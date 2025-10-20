@@ -1,0 +1,98 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-09-26 12:44:14.137573",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "doc_type_reference",
+  "gate_item",
+  "gate_item_name",
+  "gate_item_description",
+  "doc_qty",
+  "gate_receive_qty",
+  "gate_dispatch_qty",
+  "returned_qty"
+ ],
+ "fields": [
+  {
+   "fieldname": "doc_type_reference",
+   "fieldtype": "Data",
+   "label": "Doc Type Reference"
+  },
+  {
+   "allow_in_quick_entry": 1,
+   "fieldname": "gate_item",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Item"
+  },
+  {
+   "fieldname": "gate_item_name",
+   "fieldtype": "Data",
+   "label": "Item Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "gate_item_description",
+   "fieldtype": "Data",
+   "label": "Item Description",
+   "read_only": 1
+  },
+  {
+   "fieldname": "doc_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Quantity",
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "allow_in_quick_entry": 1,
+   "depends_on": "eval:(doc.doc_type_reference ==\"PO\" || doc.doc_type_reference ==\"SUB\");",
+   "fieldname": "gate_receive_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Received Quantity",
+   "mandatory_depends_on": "(doc.doc_type_reference ==\"PO\" || doc.doc_type_reference ==\"SUB\");",
+   "precision": "3",
+   "read_only_depends_on": "doc.doc_type_reference !==\"PO\" || doc.doc_type_reference !==\"SUB\";"
+  },
+  {
+   "allow_in_quick_entry": 1,
+   "depends_on": "eval:(doc.doc_type_reference ==\"SO\");",
+   "fieldname": "gate_dispatch_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Dispatch Quantity",
+   "mandatory_depends_on": "eval:(doc.doc_type_reference ==\"SO\");",
+   "precision": "3",
+   "read_only_depends_on": "eval:(doc.doc_type_reference !=\"SO\");"
+  },
+  {
+   "depends_on": "eval:(doc.doc_type_reference ==\"PR\");",
+   "fieldname": "returned_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Returned Quantity",
+   "mandatory_depends_on": "eval:(doc.doc_type_reference ==\"PR\");",
+   "precision": "3",
+   "read_only_depends_on": "eval:(doc.doc_type_reference !=\"PR\");"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2025-10-16 16:04:18.238526",
+ "modified_by": "Administrator",
+ "module": "Gate Entry",
+ "name": "Gate Pass Table",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
