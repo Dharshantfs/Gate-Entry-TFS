@@ -5,8 +5,9 @@
 Test cases for Gate Pass cancellation and amendment protection
 """
 
-import frappe
 import unittest
+
+import frappe
 from frappe import _
 
 
@@ -38,7 +39,7 @@ class TestGatePassCancellation(unittest.TestCase):
 		pr = create_purchase_receipt_from_gate_pass(gate_pass.name)
 
 		# Link to Gate Pass
-		gate_pass.db_set('purchase_receipt', pr.name)
+		gate_pass.db_set("purchase_receipt", pr.name)
 
 		# Should fail to cancel
 		with self.assertRaises(frappe.ValidationError) as context:
@@ -57,7 +58,7 @@ class TestGatePassCancellation(unittest.TestCase):
 		pr.submit()
 
 		# Link to Gate Pass
-		gate_pass.db_set('purchase_receipt', pr.name)
+		gate_pass.db_set("purchase_receipt", pr.name)
 
 		# Should fail to cancel
 		with self.assertRaises(frappe.ValidationError) as context:
@@ -76,7 +77,7 @@ class TestGatePassCancellation(unittest.TestCase):
 		pr.submit()
 
 		# Link to Gate Pass
-		gate_pass.db_set('purchase_receipt', pr.name)
+		gate_pass.db_set("purchase_receipt", pr.name)
 
 		# Cancel Purchase Receipt first
 		pr.cancel()
@@ -96,7 +97,7 @@ class TestGatePassCancellation(unittest.TestCase):
 		pr.submit()
 
 		# Link to Gate Pass
-		gate_pass.db_set('purchase_receipt', pr.name)
+		gate_pass.db_set("purchase_receipt", pr.name)
 
 		# Amend Gate Pass
 		amended_gate_pass = frappe.copy_doc(gate_pass)
@@ -137,7 +138,7 @@ class TestGatePassCancellation(unittest.TestCase):
 		pr.submit()
 
 		# Link to Gate Pass
-		gate_pass.db_set('purchase_receipt', pr.name)
+		gate_pass.db_set("purchase_receipt", pr.name)
 
 		# Should fail with link in message
 		try:
@@ -159,25 +160,22 @@ class TestGatePassCancellation(unittest.TestCase):
 
 def create_test_gate_pass():
 	"""Helper function to create test Gate Pass"""
-	gate_pass = frappe.get_doc({
-		"doctype": "Gate Pass",
-		"naming_series": "GP-.FY.-.####",
-		"entry_type": "Gate In",
-		"company": frappe.defaults.get_user_default("Company"),
-		"document_reference": "Purchase Order",
-		"reference_number": "PO-TEST-001",  # Assume this exists
-		"supplier": "Test Supplier",
-		"vehicle_number": "TEST-123",
-		"driver_name": "Test Driver",
-		"gate_pass_table": [
-			{
-				"item_code": "TEST-ITEM-001",
-				"item_name": "Test Item",
-				"uom": "Nos",
-				"received_qty": 10
-			}
-		]
-	})
+	gate_pass = frappe.get_doc(
+		{
+			"doctype": "Gate Pass",
+			"naming_series": "GP-.FY.-.####",
+			"entry_type": "Gate In",
+			"company": frappe.defaults.get_user_default("Company"),
+			"document_reference": "Purchase Order",
+			"reference_number": "PO-TEST-001",  # Assume this exists
+			"supplier": "Test Supplier",
+			"vehicle_number": "TEST-123",
+			"driver_name": "Test Driver",
+			"gate_pass_table": [
+				{"item_code": "TEST-ITEM-001", "item_name": "Test Item", "uom": "Nos", "received_qty": 10}
+			],
+		}
+	)
 	gate_pass.insert()
 	return gate_pass
 
@@ -243,4 +241,3 @@ MANUAL TESTING STEPS:
    - Check that status (Draft/Submitted) is displayed
    - Check that instructions are clear
 """
-

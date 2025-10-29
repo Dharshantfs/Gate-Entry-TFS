@@ -41,7 +41,7 @@ def create_gate_pass_custom_fields():
 				"no_copy": 1,
 				"print_hide": 1,
 				"translatable": 0,
-				"search_index": 1
+				"search_index": 1,
 			}
 		],
 		"Subcontracting Receipt": [
@@ -55,9 +55,9 @@ def create_gate_pass_custom_fields():
 				"no_copy": 1,
 				"print_hide": 1,
 				"translatable": 0,
-				"search_index": 1
+				"search_index": 1,
 			}
-		]
+		],
 	}
 
 	create_custom_fields(custom_fields, update=True)
@@ -70,4 +70,3 @@ def create_gate_pass_custom_fields():
 
 if __name__ == "__main__":
 	setup()
-

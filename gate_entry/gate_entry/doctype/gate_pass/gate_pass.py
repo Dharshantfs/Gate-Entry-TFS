@@ -2,9 +2,10 @@
 # For license information, please see license.txt
 
 import frappe
-from frappe.model.document import Document
-from frappe.utils import nowdate, nowtime, flt
 from frappe import _
+from frappe.model.document import Document
+from frappe.utils import flt, nowdate, nowtime
+
 
 class GatePass(Document):
 	def before_save(self):
@@ -47,7 +48,9 @@ class GatePass(Document):
 		# Validate received quantities
 		for item in self.gate_pass_table:
 			if flt(item.received_qty) <= 0:
-				frappe.throw(_("Received quantity for item {0} must be greater than zero").format(item.item_code))
+				frappe.throw(
+					_("Received quantity for item {0} must be greater than zero").format(item.item_code)
+				)
 
 		# Validate reference document
 		if self.document_reference and self.reference_number:
@@ -70,7 +73,7 @@ class GatePass(Document):
 		"""
 		if self.document_reference and self.reference_number and self.supplier:
 			doc = frappe.get_doc(self.document_reference, self.reference_number)
-			if hasattr(doc, 'supplier') and doc.supplier != self.supplier:
+			if hasattr(doc, "supplier") and doc.supplier != self.supplier:
 				frappe.throw(_("Supplier does not match the reference document"))
 
 	def on_submit(self):
@@ -103,23 +106,31 @@ class GatePass(Document):
 
 		# Check for Purchase Receipt
 		if original_doc.purchase_receipt:
-			receipt_status = frappe.db.get_value("Purchase Receipt", original_doc.purchase_receipt, "docstatus")
+			receipt_status = frappe.db.get_value(
+				"Purchase Receipt", original_doc.purchase_receipt, "docstatus"
+			)
 			if receipt_status == 1:  # Submitted
-				linked_receipts.append({
-					"doctype": "Purchase Receipt",
-					"name": original_doc.purchase_receipt,
-					"status": "Submitted"
-				})
+				linked_receipts.append(
+					{
+						"doctype": "Purchase Receipt",
+						"name": original_doc.purchase_receipt,
+						"status": "Submitted",
+					}
+				)
 
 		# Check for Subcontracting Receipt
 		if original_doc.subcontracting_receipt:
-			receipt_status = frappe.db.get_value("Subcontracting Receipt", original_doc.subcontracting_receipt, "docstatus")
+			receipt_status = frappe.db.get_value(
+				"Subcontracting Receipt", original_doc.subcontracting_receipt, "docstatus"
+			)
 			if receipt_status == 1:  # Submitted
-				linked_receipts.append({
-					"doctype": "Subcontracting Receipt",
-					"name": original_doc.subcontracting_receipt,
-					"status": "Submitted"
-				})
+				linked_receipts.append(
+					{
+						"doctype": "Subcontracting Receipt",
+						"name": original_doc.subcontracting_receipt,
+						"status": "Submitted",
+					}
+				)
 
 		if linked_receipts:
 			self.throw_amendment_error(linked_receipts)
@@ -134,33 +145,35 @@ class GatePass(Document):
 		if self.purchase_receipt:
 			receipt_status = frappe.db.get_value("Purchase Receipt", self.purchase_receipt, "docstatus")
 			if receipt_status == 1:  # Submitted
-				linked_receipts.append({
-					"doctype": "Purchase Receipt",
-					"name": self.purchase_receipt,
-					"status": "Submitted"
-				})
+				linked_receipts.append(
+					{"doctype": "Purchase Receipt", "name": self.purchase_receipt, "status": "Submitted"}
+				)
 			elif receipt_status == 0:  # Draft
-				linked_receipts.append({
-					"doctype": "Purchase Receipt",
-					"name": self.purchase_receipt,
-					"status": "Draft"
-				})
+				linked_receipts.append(
+					{"doctype": "Purchase Receipt", "name": self.purchase_receipt, "status": "Draft"}
+				)
 
 		# Check for Subcontracting Receipt
 		if self.subcontracting_receipt:
-			receipt_status = frappe.db.get_value("Subcontracting Receipt", self.subcontracting_receipt, "docstatus")
+			receipt_status = frappe.db.get_value(
+				"Subcontracting Receipt", self.subcontracting_receipt, "docstatus"
+			)
 			if receipt_status == 1:  # Submitted
-				linked_receipts.append({
-					"doctype": "Subcontracting Receipt",
-					"name": self.subcontracting_receipt,
-					"status": "Submitted"
-				})
+				linked_receipts.append(
+					{
+						"doctype": "Subcontracting Receipt",
+						"name": self.subcontracting_receipt,
+						"status": "Submitted",
+					}
+				)
 			elif receipt_status == 0:  # Draft
-				linked_receipts.append({
-					"doctype": "Subcontracting Receipt",
-					"name": self.subcontracting_receipt,
-					"status": "Draft"
-				})
+				linked_receipts.append(
+					{
+						"doctype": "Subcontracting Receipt",
+						"name": self.subcontracting_receipt,
+						"status": "Draft",
+					}
+				)
 
 		if linked_receipts:
 			self.throw_cancellation_error(linked_receipts)
@@ -169,7 +182,9 @@ class GatePass(Document):
 		"""
 		Throw error with list of linked receipts
 		"""
-		message = _("<b>Cannot cancel this Gate Pass because the following receipt(s) are linked to it:</b><br><br>")
+		message = _(
+			"<b>Cannot cancel this Gate Pass because the following receipt(s) are linked to it:</b><br><br>"
+		)
 
 		for receipt in linked_receipts:
 			receipt_link = frappe.utils.get_link_to_form(receipt["doctype"], receipt["name"])
@@ -184,7 +199,9 @@ class GatePass(Document):
 		"""
 		Throw error preventing amendment when receipts exist
 		"""
-		message = _("<b>Cannot amend this Gate Pass because the following receipt(s) were created from it:</b><br><br>")
+		message = _(
+			"<b>Cannot amend this Gate Pass because the following receipt(s) were created from it:</b><br><br>"
+		)
 
 		for receipt in linked_receipts:
 			receipt_link = frappe.utils.get_link_to_form(receipt["doctype"], receipt["name"])
@@ -241,9 +258,7 @@ def get_purchase_order_items(purchase_order):
 
 	# Fetch items from Purchase Order
 	po_items = frappe.get_all(
-		"Purchase Order Item",
-		filters={"parent": purchase_order, "docstatus": 1},
-		fields=["*"]
+		"Purchase Order Item", filters={"parent": purchase_order, "docstatus": 1}, fields=["*"]
 	)
 
 	items = []
@@ -260,16 +275,18 @@ def get_purchase_order_items(purchase_order):
 			ordered_qty = flt(po_item.qty)
 			pending_qty = ordered_qty - total_received
 
-		items.append({
-			"item_code": po_item.item_code,
-			"item_name": po_item.item_name,
-			"description": po_item.description or "",
-			"uom": po_item.uom,
-			"ordered_qty": ordered_qty,
-			"received_qty": flt(total_received),
-			"pending_qty": max(0, pending_qty),
-			"is_rate_contract": is_rate_contract  # Flag for client-side validation
-		})
+		items.append(
+			{
+				"item_code": po_item.item_code,
+				"item_name": po_item.item_name,
+				"description": po_item.description or "",
+				"uom": po_item.uom,
+				"ordered_qty": ordered_qty,
+				"received_qty": flt(total_received),
+				"pending_qty": max(0, pending_qty),
+				"is_rate_contract": is_rate_contract,  # Flag for client-side validation
+			}
+		)
 
 	return items
 
@@ -280,29 +297,31 @@ def get_subcontracting_order_items(subcontracting_order):
 	"""
 	# Fetch items from Subcontracting Order
 	so_items = frappe.get_all(
-		"Subcontracting Order Item",
-		filters={"parent": subcontracting_order, "docstatus": 1},
-		fields=["*"]
+		"Subcontracting Order Item", filters={"parent": subcontracting_order, "docstatus": 1}, fields=["*"]
 	)
 
 	items = []
 	for so_item in so_items:
 		# Calculate pending quantity from gate passes
-		gate_pass_qty = get_gate_pass_received_qty(subcontracting_order, so_item.item_code, "Subcontracting Order")
+		gate_pass_qty = get_gate_pass_received_qty(
+			subcontracting_order, so_item.item_code, "Subcontracting Order"
+		)
 
 		# Calculate total received
 		total_received = flt(so_item.received_qty) + flt(gate_pass_qty)
 		pending_qty = flt(so_item.qty) - total_received
 
-		items.append({
-			"item_code": so_item.item_code,
-			"item_name": so_item.item_name,
-			"description": so_item.description or "",
-			"uom": so_item.uom,
-			"ordered_qty": flt(so_item.qty),
-			"received_qty": flt(total_received),
-			"pending_qty": max(0, pending_qty)
-		})
+		items.append(
+			{
+				"item_code": so_item.item_code,
+				"item_name": so_item.item_name,
+				"description": so_item.description or "",
+				"uom": so_item.uom,
+				"ordered_qty": flt(so_item.qty),
+				"received_qty": flt(total_received),
+				"pending_qty": max(0, pending_qty),
+			}
+		)
 
 	return items
 
@@ -324,17 +343,15 @@ def get_gate_pass_received_qty(reference_number, item_code, document_reference="
 		filters={
 			"reference_number": reference_number,
 			"document_reference": document_reference,
-			"docstatus": ["!=", 2]  # Exclude cancelled
+			"docstatus": ["!=", 2],  # Exclude cancelled
 		},
-		fields=["name"]
+		fields=["name"],
 	)
 
 	total_qty = 0
 	for gp in gate_passes:
 		items = frappe.get_all(
-			"Gate Pass Table",
-			filters={"parent": gp.name, "item_code": item_code},
-			fields=["received_qty"]
+			"Gate Pass Table", filters={"parent": gp.name, "item_code": item_code}, fields=["received_qty"]
 		)
 		for item in items:
 			total_qty += flt(item.received_qty)
@@ -390,7 +407,6 @@ def create_purchase_receipt(gate_pass_name):
 	if gate_pass.document_reference != "Purchase Order":
 		frappe.throw(_("This Gate Pass is not for a Purchase Order"))
 
-
 	# Create Purchase Receipt
 	pr = frappe.new_doc("Purchase Receipt")
 	pr.supplier = gate_pass.supplier
@@ -402,16 +418,19 @@ def create_purchase_receipt(gate_pass_name):
 
 	# Add items
 	for item in gate_pass.gate_pass_table:
-		pr.append("items", {
-			"item_code": item.item_code,
-			"item_name": item.item_name,
-			"description": item.description,
-			"uom": item.uom,
-			"qty": item.received_qty,
-			"received_qty": item.received_qty,
-			"purchase_order": gate_pass.reference_number,
-			"purchase_order_item": get_po_item_name(gate_pass.reference_number, item.item_code)
-		})
+		pr.append(
+			"items",
+			{
+				"item_code": item.item_code,
+				"item_name": item.item_name,
+				"description": item.description,
+				"uom": item.uom,
+				"qty": item.received_qty,
+				"received_qty": item.received_qty,
+				"purchase_order": gate_pass.reference_number,
+				"purchase_order_item": get_po_item_name(gate_pass.reference_number, item.item_code),
+			},
+		)
 
 	pr.insert()
 
@@ -464,15 +483,18 @@ def create_subcontracting_receipt(gate_pass_name):
 
 	# Add items
 	for item in gate_pass.gate_pass_table:
-		sr.append("items", {
-			"item_code": item.item_code,
-			"item_name": item.item_name,
-			"description": item.description,
-			"uom": item.uom,
-			"qty": item.received_qty,
-			"received_qty": item.received_qty,
-			"subcontracting_order": gate_pass.reference_number
-		})
+		sr.append(
+			"items",
+			{
+				"item_code": item.item_code,
+				"item_name": item.item_name,
+				"description": item.description,
+				"uom": item.uom,
+				"qty": item.received_qty,
+				"received_qty": item.received_qty,
+				"subcontracting_order": gate_pass.reference_number,
+			},
+		)
 
 	sr.insert()
 
@@ -490,9 +512,7 @@ def get_po_item_name(purchase_order, item_code):
 	Get Purchase Order Item name for linking
 	"""
 	po_item = frappe.get_value(
-		"Purchase Order Item",
-		{"parent": purchase_order, "item_code": item_code},
-		"name"
+		"Purchase Order Item", {"parent": purchase_order, "item_code": item_code}, "name"
 	)
 	return po_item
 
@@ -502,6 +522,7 @@ def get_po_item_name(purchase_order, item_code):
 # Note: Gate Pass is in ignore_links_on_delete (hooks.py) which allows
 # Purchase Receipts and Subcontracting Receipts to be deleted even when linked.
 # These handlers clean up the Gate Pass references when receipts are deleted/cancelled.
+
 
 def on_purchase_receipt_trash(doc, method):
 	"""
@@ -548,13 +569,7 @@ def clear_gate_pass_reference(gate_pass_name, field_name):
 
 	try:
 		# Clear the reference field in Gate Pass
-		frappe.db.set_value(
-			"Gate Pass",
-			gate_pass_name,
-			field_name,
-			None,
-			update_modified=False
-		)
+		frappe.db.set_value("Gate Pass", gate_pass_name, field_name, None, update_modified=False)
 
 		frappe.msgprint(
 			_("Gate Pass {0} has been updated. The receipt reference has been cleared.").format(
@@ -563,7 +578,5 @@ def clear_gate_pass_reference(gate_pass_name, field_name):
 		)
 	except Exception as e:
 		frappe.log_error(
-			message=frappe.get_traceback(),
-			title=_("Error clearing Gate Pass reference"),exception=e
+			message=frappe.get_traceback(), title=_("Error clearing Gate Pass reference"), exception=e
 		)
-

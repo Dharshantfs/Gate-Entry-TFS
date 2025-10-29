@@ -43,7 +43,7 @@ app_include_css = "/assets/gate_entry/css/gate_pass.css"
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-doctype_js = {"Gate Pass" : "public/js/gate_pass_custom_ui.js"}
+doctype_js = {"Gate Pass": "public/js/gate_pass_custom_ui.js"}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -141,12 +141,12 @@ after_install = "gate_entry.setup.install.after_install"
 doc_events = {
 	"Purchase Receipt": {
 		"on_trash": "gate_entry.gate_entry.doctype.gate_pass.gate_pass.on_purchase_receipt_trash",
-		"on_cancel": "gate_entry.gate_entry.doctype.gate_pass.gate_pass.on_purchase_receipt_cancel"
+		"on_cancel": "gate_entry.gate_entry.doctype.gate_pass.gate_pass.on_purchase_receipt_cancel",
 	},
 	"Subcontracting Receipt": {
 		"on_trash": "gate_entry.gate_entry.doctype.gate_pass.gate_pass.on_subcontracting_receipt_trash",
-		"on_cancel": "gate_entry.gate_entry.doctype.gate_pass.gate_pass.on_subcontracting_receipt_cancel"
-	}
+		"on_cancel": "gate_entry.gate_entry.doctype.gate_pass.gate_pass.on_subcontracting_receipt_cancel",
+	},
 }
 
 # Scheduled Tasks
@@ -204,14 +204,8 @@ ignore_links_on_delete = ["Gate Pass"]
 # Define connections between doctypes that will appear in the Connections section
 document_links = {
 	"Gate Pass": [
-		{
-			"link_doctype": "Purchase Receipt",
-			"link_fieldname": "gate_pass"
-		},
-		{
-			"link_doctype": "Subcontracting Receipt",
-			"link_fieldname": "gate_pass"
-		}
+		{"link_doctype": "Purchase Receipt", "link_fieldname": "gate_pass"},
+		{"link_doctype": "Subcontracting Receipt", "link_fieldname": "gate_pass"},
 	]
 }
 
@@ -262,4 +256,3 @@ document_links = {
 # default_log_clearing_doctypes = {
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
-

@@ -1,6 +1,6 @@
 /**
  * Gate Pass Custom UI Component
- * 
+ *
  * This component provides a todo-list style interface for managing items in a Gate Pass.
  * Features:
  * - Clean, modern UI with Item Code, Item Name, and Received Qty columns
@@ -26,7 +26,7 @@ class GatePassCustomUI {
 	 */
 	init() {
 		if (!this.frm || !this.frm.fields_dict.custom_ui) {
-			console.error('Custom UI field not found');
+			console.error("Custom UI field not found");
 			return;
 		}
 
@@ -40,44 +40,44 @@ class GatePassCustomUI {
 	 */
 	load_items_from_table() {
 		this.items = [];
-		
+
 		// Ensure the form and child table exist
 		if (!this.frm || !this.frm.doc) {
-			console.warn('Gate Pass Custom UI: Form or document not available');
+			console.warn("Gate Pass Custom UI: Form or document not available");
 			return this.items;
 		}
-		
+
 		// Debug: Check child table state
-		console.log('Gate Pass Custom UI: Loading items from child table', {
+		console.log("Gate Pass Custom UI: Loading items from child table", {
 			has_table: !!this.frm.doc.gate_pass_table,
 			table_length: this.frm.doc.gate_pass_table ? this.frm.doc.gate_pass_table.length : 0,
-			table_data: this.frm.doc.gate_pass_table
+			table_data: this.frm.doc.gate_pass_table,
 		});
-		
+
 		// Load items from the child table
 		if (this.frm.doc.gate_pass_table && this.frm.doc.gate_pass_table.length > 0) {
-			this.frm.doc.gate_pass_table.forEach(row => {
+			this.frm.doc.gate_pass_table.forEach((row) => {
 				// Only add items that have a valid item_code
 				if (row.item_code) {
 					this.items.push({
 						item_code: row.item_code,
-						item_name: row.item_name || '',
-						description: row.description || '',
-						uom: row.uom || '',
+						item_name: row.item_name || "",
+						description: row.description || "",
+						uom: row.uom || "",
 						ordered_qty: row.ordered_qty || 0,
 						received_qty: row.received_qty || 0,
 						pending_qty: row.pending_qty || 0,
 						is_rate_contract: row.is_rate_contract || 0,
-						idx: row.idx
+						idx: row.idx,
 					});
 				} else {
-					console.warn('Gate Pass Custom UI: Row missing item_code', row);
+					console.warn("Gate Pass Custom UI: Row missing item_code", row);
 				}
 			});
 		}
-		
-		console.log('Gate Pass Custom UI: Loaded items', this.items);
-		
+
+		console.log("Gate Pass Custom UI: Loaded items", this.items);
+
 		return this.items;
 	}
 
@@ -85,18 +85,18 @@ class GatePassCustomUI {
 	 * Sync items to the hidden child table
 	 */
 	sync_to_child_table() {
-		console.log('Gate Pass Custom UI: Syncing items to child table', this.items);
-		
+		console.log("Gate Pass Custom UI: Syncing items to child table", this.items);
+
 		// Clear existing rows
-		this.frm.clear_table('gate_pass_table');
+		this.frm.clear_table("gate_pass_table");
 
 		// Add items to child table
 		this.items.forEach((item, index) => {
-			let row = this.frm.add_child('gate_pass_table');
+			let row = this.frm.add_child("gate_pass_table");
 			row.item_code = item.item_code;
 			row.item_name = item.item_name;
-			row.description = item.description || '';
-			row.uom = item.uom || '';
+			row.description = item.description || "";
+			row.uom = item.uom || "";
 			row.ordered_qty = item.ordered_qty || 0;
 			row.received_qty = item.received_qty || 0;
 			row.pending_qty = item.pending_qty || 0;
@@ -105,10 +105,10 @@ class GatePassCustomUI {
 		});
 
 		// Refresh the child table and mark form as dirty
-		this.frm.refresh_field('gate_pass_table');
+		this.frm.refresh_field("gate_pass_table");
 		this.frm.dirty();
-		
-		console.log('Gate Pass Custom UI: Child table synced', this.frm.doc.gate_pass_table);
+
+		console.log("Gate Pass Custom UI: Child table synced", this.frm.doc.gate_pass_table);
 	}
 
 	/**
@@ -117,13 +117,13 @@ class GatePassCustomUI {
 	render() {
 		// Load items from child table before rendering
 		this.load_items_from_table();
-		
+
 		// Ensure wrapper exists
 		if (!this.wrapper || !this.wrapper.length) {
-			console.error('Custom UI wrapper not found');
+			console.error("Custom UI wrapper not found");
 			return;
 		}
-		
+
 		let html = `
 			<div class="gate-pass-custom-ui">
 				<div class="gate-pass-items-header">
@@ -183,9 +183,11 @@ class GatePassCustomUI {
 			return this.render_empty_state();
 		}
 
-		let items_html = this.items.map((item, index) => {
-			return this.render_item_row(item, index);
-		}).join('');
+		let items_html = this.items
+			.map((item, index) => {
+				return this.render_item_row(item, index);
+			})
+			.join("");
 
 		return `
 			<div class="items-list">
@@ -209,7 +211,7 @@ class GatePassCustomUI {
 		const is_rate_contract = item.is_rate_contract || 0;
 		const pending_qty = parseFloat(item.pending_qty || 0);
 		const received_qty = parseFloat(item.received_qty || 0);
-		
+
 		// For Rate Contracts, status is complete if any quantity is received
 		// For normal orders, status is complete if pending quantity is 0
 		let is_fully_received;
@@ -218,35 +220,39 @@ class GatePassCustomUI {
 		} else {
 			is_fully_received = pending_qty <= 0 && received_qty > 0;
 		}
-		
-		const status_class = is_fully_received ? 'status-complete' : 'status-pending';
+
+		const status_class = is_fully_received ? "status-complete" : "status-pending";
 
 		return `
 			<div class="item-row ${status_class}" data-index="${index}">
 				<div class="item-col item-code-col">
 					<span class="item-code">${frappe.utils.escape_html(item.item_code)}</span>
-					${is_rate_contract ? '<span class="badge badge-info" style="font-size: 9px; margin-left: 4px;">RC</span>' : ''}
+					${
+						is_rate_contract
+							? '<span class="badge badge-info" style="font-size: 9px; margin-left: 4px;">RC</span>'
+							: ""
+					}
 				</div>
 				<div class="item-col item-name-col">
 					<span class="item-name">${frappe.utils.escape_html(item.item_name)}</span>
 				</div>
 				<div class="item-col received-qty-col">
-					<input 
-						type="number" 
-						class="form-control form-control-sm received-qty-input" 
+					<input
+						type="number"
+						class="form-control form-control-sm received-qty-input"
 						value="${received_qty}"
 						min="0"
 						step="0.01"
 						data-index="${index}"
-						${this.frm.doc.docstatus === 1 ? 'disabled' : ''}
+						${this.frm.doc.docstatus === 1 ? "disabled" : ""}
 					/>
 				</div>
 				<div class="item-col actions-col">
 					<button class="btn btn-xs btn-info info-btn" data-index="${index}" title="View Details">
 						<i class="fa fa-info-circle"></i>
 					</button>
-					<button class="btn btn-xs btn-danger remove-btn" data-index="${index}" title="Remove Item" 
-						${this.frm.doc.docstatus === 1 ? 'disabled' : ''}>
+					<button class="btn btn-xs btn-danger remove-btn" data-index="${index}" title="Remove Item"
+						${this.frm.doc.docstatus === 1 ? "disabled" : ""}>
 						<i class="fa fa-minus"></i>
 					</button>
 				</div>
@@ -261,35 +267,50 @@ class GatePassCustomUI {
 		const self = this;
 
 		// Add item button
-		this.wrapper.find('.add-item-btn').off('click').on('click', function() {
-			self.show_add_item_dialog();
-		});
+		this.wrapper
+			.find(".add-item-btn")
+			.off("click")
+			.on("click", function () {
+				self.show_add_item_dialog();
+			});
 
 		// Remove item buttons
-		this.wrapper.find('.remove-btn').off('click').on('click', function() {
-			const index = $(this).data('index');
-			self.remove_item(index);
-		});
+		this.wrapper
+			.find(".remove-btn")
+			.off("click")
+			.on("click", function () {
+				const index = $(this).data("index");
+				self.remove_item(index);
+			});
 
 		// Info buttons
-		this.wrapper.find('.info-btn').off('click').on('click', function() {
-			const index = $(this).data('index');
-			self.show_item_details(index);
-		});
+		this.wrapper
+			.find(".info-btn")
+			.off("click")
+			.on("click", function () {
+				const index = $(this).data("index");
+				self.show_item_details(index);
+			});
 
 		// Received quantity inputs
-		this.wrapper.find('.received-qty-input').off('change').on('change', function() {
-			const index = $(this).data('index');
-			const value = parseFloat($(this).val() || 0);
-			self.update_received_qty(index, value);
-		});
+		this.wrapper
+			.find(".received-qty-input")
+			.off("change")
+			.on("change", function () {
+				const index = $(this).data("index");
+				const value = parseFloat($(this).val() || 0);
+				self.update_received_qty(index, value);
+			});
 
 		// Real-time validation on input
-		this.wrapper.find('.received-qty-input').off('input').on('input', function() {
-			const index = $(this).data('index');
-			const value = parseFloat($(this).val() || 0);
-			self.validate_quantity_input(index, value, $(this));
-		});
+		this.wrapper
+			.find(".received-qty-input")
+			.off("input")
+			.on("input", function () {
+				const index = $(this).data("index");
+				const value = parseFloat($(this).val() || 0);
+				self.validate_quantity_input(index, value, $(this));
+			});
 	}
 
 	/**
@@ -299,23 +320,23 @@ class GatePassCustomUI {
 		const self = this;
 
 		if (!this.frm.doc.reference_number || !this.frm.doc.document_reference) {
-			frappe.msgprint(__('Please select Document Reference and Reference Number first'));
+			frappe.msgprint(__("Please select Document Reference and Reference Number first"));
 			return;
 		}
 
 		// Fetch available items from the reference document
 		frappe.call({
-			method: 'gate_entry.gate_entry.doctype.gate_pass.gate_pass.get_items',
+			method: "gate_entry.gate_entry.doctype.gate_pass.gate_pass.get_items",
 			args: {
 				document_reference: this.frm.doc.document_reference,
-				reference_number: this.frm.doc.reference_number
+				reference_number: this.frm.doc.reference_number,
 			},
-			callback: function(r) {
+			callback: function (r) {
 				if (r.message) {
 					self.available_items = r.message;
 					self.show_item_selector_dialog();
 				}
-			}
+			},
 		});
 	}
 
@@ -326,33 +347,33 @@ class GatePassCustomUI {
 		const self = this;
 
 		// Filter out items that are already added
-		const added_item_codes = this.items.map(item => item.item_code);
+		const added_item_codes = this.items.map((item) => item.item_code);
 		const available_for_selection = this.available_items.filter(
-			item => !added_item_codes.includes(item.item_code)
+			(item) => !added_item_codes.includes(item.item_code)
 		);
 
 		if (available_for_selection.length === 0) {
-			frappe.msgprint(__('All items from the reference document have been added'));
+			frappe.msgprint(__("All items from the reference document have been added"));
 			return;
 		}
 
 		// Create dialog
 		const dialog = new frappe.ui.Dialog({
-			title: __('Select Items to Add'),
+			title: __("Select Items to Add"),
 			fields: [
 				{
-					fieldtype: 'HTML',
-					fieldname: 'items_html'
-				}
+					fieldtype: "HTML",
+					fieldname: "items_html",
+				},
 			],
-			primary_action_label: __('Add Selected'),
-			primary_action: function() {
+			primary_action_label: __("Add Selected"),
+			primary_action: function () {
 				const selected_items = dialog.$wrapper.find('input[type="checkbox"]:checked');
 				const items_to_add = [];
 
-				selected_items.each(function() {
+				selected_items.each(function () {
 					const item_code = $(this).val();
-					const item = available_for_selection.find(i => i.item_code === item_code);
+					const item = available_for_selection.find((i) => i.item_code === item_code);
 					if (item) {
 						items_to_add.push(item);
 					}
@@ -362,29 +383,31 @@ class GatePassCustomUI {
 					self.add_items(items_to_add);
 					dialog.hide();
 				} else {
-					frappe.msgprint(__('Please select at least one item'));
+					frappe.msgprint(__("Please select at least one item"));
 				}
-			}
+			},
 		});
 
 		// Render items in dialog
-		const items_html = available_for_selection.map(item => {
-			const is_rate_contract = item.is_rate_contract || 0;
-			const pending_info = is_rate_contract 
-				? '<span class="badge badge-info">Rate Contract</span>'
-				: `<span class="text-muted">(Pending: ${item.pending_qty} ${item.uom})</span>`;
-			
-			return `
+		const items_html = available_for_selection
+			.map((item) => {
+				const is_rate_contract = item.is_rate_contract || 0;
+				const pending_info = is_rate_contract
+					? '<span class="badge badge-info">Rate Contract</span>'
+					: `<span class="text-muted">(Pending: ${item.pending_qty} ${item.uom})</span>`;
+
+				return `
 				<div class="checkbox">
 					<label>
 						<input type="checkbox" value="${item.item_code}">
-						<strong>${frappe.utils.escape_html(item.item_code)}</strong> - 
+						<strong>${frappe.utils.escape_html(item.item_code)}</strong> -
 						${frappe.utils.escape_html(item.item_name)}
 						${pending_info}
 					</label>
 				</div>
 			`;
-		}).join('');
+			})
+			.join("");
 
 		dialog.fields_dict.items_html.$wrapper.html(`
 			<div class="item-selector-list">
@@ -399,16 +422,16 @@ class GatePassCustomUI {
 	 * Add items to the list
 	 */
 	add_items(items_to_add) {
-		items_to_add.forEach(item => {
+		items_to_add.forEach((item) => {
 			this.items.push({
 				item_code: item.item_code,
 				item_name: item.item_name,
-				description: item.description || '',
-				uom: item.uom || '',
+				description: item.description || "",
+				uom: item.uom || "",
 				ordered_qty: item.ordered_qty || 0,
-				received_qty: 0,  // Default to 0, user will enter
+				received_qty: 0, // Default to 0, user will enter
 				pending_qty: item.pending_qty || 0,
-				is_rate_contract: item.is_rate_contract || 0  // Rate Contract flag
+				is_rate_contract: item.is_rate_contract || 0, // Rate Contract flag
 			});
 		});
 
@@ -421,19 +444,16 @@ class GatePassCustomUI {
 	 */
 	remove_item(index) {
 		const item = this.items[index];
-		
-		frappe.confirm(
-			__('Are you sure you want to remove {0}?', [item.item_code]),
-			() => {
-				this.items.splice(index, 1);
-				this.sync_to_child_table();
-				this.render();
-				frappe.show_alert({
-					message: __('Item removed successfully'),
-					indicator: 'green'
-				});
-			}
-		);
+
+		frappe.confirm(__("Are you sure you want to remove {0}?", [item.item_code]), () => {
+			this.items.splice(index, 1);
+			this.sync_to_child_table();
+			this.render();
+			frappe.show_alert({
+				message: __("Item removed successfully"),
+				indicator: "green",
+			});
+		});
 	}
 
 	/**
@@ -444,7 +464,7 @@ class GatePassCustomUI {
 
 		// Validate quantity
 		if (value < 0) {
-			frappe.msgprint(__('Received quantity cannot be negative'));
+			frappe.msgprint(__("Received quantity cannot be negative"));
 			this.render();
 			return;
 		}
@@ -458,9 +478,12 @@ class GatePassCustomUI {
 		// For Rate Contracts, quantity validation is relaxed as ordered quantity is 0
 		if (!is_rate_contract && value > pending_qty && pending_qty > 0) {
 			frappe.msgprint({
-				title: __('Over Receipt Warning'),
-				message: __('You are receiving more than the pending quantity ({0} {1})', [pending_qty, item.uom]),
-				indicator: 'orange'
+				title: __("Over Receipt Warning"),
+				message: __("You are receiving more than the pending quantity ({0} {1})", [
+					pending_qty,
+					item.uom,
+				]),
+				indicator: "orange",
 			});
 		}
 
@@ -483,13 +506,13 @@ class GatePassCustomUI {
 		const is_rate_contract = item.is_rate_contract || 0;
 
 		// Remove any previous validation classes
-		input_element.removeClass('text-danger text-warning');
+		input_element.removeClass("text-danger text-warning");
 
 		if (value < 0) {
-			input_element.addClass('text-danger');
+			input_element.addClass("text-danger");
 		} else if (!is_rate_contract && value > pending_qty && pending_qty > 0) {
 			// Only show over-receipt warning for non-rate contracts
-			input_element.addClass('text-warning');
+			input_element.addClass("text-warning");
 		}
 	}
 
@@ -502,75 +525,75 @@ class GatePassCustomUI {
 
 		let fields = [
 			{
-				fieldtype: 'Data',
-				fieldname: 'item_code',
-				label: __('Item Code'),
+				fieldtype: "Data",
+				fieldname: "item_code",
+				label: __("Item Code"),
 				read_only: 1,
-				default: item.item_code
+				default: item.item_code,
 			},
 			{
-				fieldtype: 'Data',
-				fieldname: 'item_name',
-				label: __('Item Name'),
+				fieldtype: "Data",
+				fieldname: "item_name",
+				label: __("Item Name"),
 				read_only: 1,
-				default: item.item_name
+				default: item.item_name,
 			},
 			{
-				fieldtype: 'Small Text',
-				fieldname: 'description',
-				label: __('Description'),
+				fieldtype: "Small Text",
+				fieldname: "description",
+				label: __("Description"),
 				read_only: 1,
-				default: item.description || 'N/A'
+				default: item.description || "N/A",
 			},
 			{
-				fieldtype: 'Column Break'
+				fieldtype: "Column Break",
 			},
 			{
-				fieldtype: 'Data',
-				fieldname: 'uom',
-				label: __('UOM'),
+				fieldtype: "Data",
+				fieldname: "uom",
+				label: __("UOM"),
 				read_only: 1,
-				default: item.uom || 'N/A'
-			}
+				default: item.uom || "N/A",
+			},
 		];
 
 		// Add order type information
 		if (is_rate_contract) {
 			fields.push({
-				fieldtype: 'Data',
-				fieldname: 'order_type',
-				label: __('Order Type'),
+				fieldtype: "Data",
+				fieldname: "order_type",
+				label: __("Order Type"),
 				read_only: 1,
-				default: 'Rate Contract'
+				default: "Rate Contract",
 			});
 		} else {
 			fields.push({
-				fieldtype: 'Float',
-				fieldname: 'ordered_qty',
-				label: __('Ordered Qty'),
+				fieldtype: "Float",
+				fieldname: "ordered_qty",
+				label: __("Ordered Qty"),
 				read_only: 1,
-				default: item.ordered_qty || 0
+				default: item.ordered_qty || 0,
 			});
 			fields.push({
-				fieldtype: 'Float',
-				fieldname: 'pending_qty',
-				label: __('Pending Qty'),
+				fieldtype: "Float",
+				fieldname: "pending_qty",
+				label: __("Pending Qty"),
 				read_only: 1,
-				default: item.pending_qty || 0
+				default: item.pending_qty || 0,
 			});
 		}
 
 		fields.push({
-			fieldtype: 'Float',
-			fieldname: 'received_qty',
-			label: __('Received Qty'),
+			fieldtype: "Float",
+			fieldname: "received_qty",
+			label: __("Received Qty"),
 			read_only: 1,
-			default: item.received_qty || 0
+			default: item.received_qty || 0,
 		});
 
 		const dialog = new frappe.ui.Dialog({
-			title: __('Item Details'),
-			fields: fields
+			title: __("Item Details"),
+			fields: fields,
 		});
 
 		dialog.show();
@@ -583,7 +606,7 @@ class GatePassCustomUI {
 		const self = this;
 
 		// Re-render when form is refreshed
-		this.frm.cscript.custom_onload = function() {
+		this.frm.cscript.custom_onload = function () {
 			self.render();
 		};
 	}
@@ -601,4 +624,3 @@ class GatePassCustomUI {
 
 // Export for use in gate_pass.js
 window.GatePassCustomUI = GatePassCustomUI;
-

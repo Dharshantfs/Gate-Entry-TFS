@@ -32,7 +32,7 @@ def create_gate_pass_custom_fields():
 				"read_only": 1,
 				"no_copy": 1,
 				"print_hide": 1,
-				"translatable": 0
+				"translatable": 0,
 			}
 		],
 		"Subcontracting Receipt": [
@@ -45,11 +45,10 @@ def create_gate_pass_custom_fields():
 				"read_only": 1,
 				"no_copy": 1,
 				"print_hide": 1,
-				"translatable": 0
+				"translatable": 0,
 			}
-		]
+		],
 	}
 
 	create_custom_fields(custom_fields, update=True)
 	frappe.db.commit()
-
