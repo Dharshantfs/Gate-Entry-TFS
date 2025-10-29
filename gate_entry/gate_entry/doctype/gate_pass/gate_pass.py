@@ -479,7 +479,7 @@ def create_subcontracting_receipt(gate_pass_name):
 	sr.insert()
 
 	# Update Gate Pass with receipt reference
-	gate_pass.subcontracting_receipt_reference = sr.name
+	gate_pass.subcontracting_receipt = sr.name
 	gate_pass.save(ignore_permissions=True)
 
 	frappe.db.commit()
