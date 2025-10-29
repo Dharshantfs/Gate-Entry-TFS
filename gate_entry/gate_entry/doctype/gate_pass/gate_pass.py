@@ -390,8 +390,6 @@ def create_purchase_receipt(gate_pass_name):
 	if gate_pass.document_reference != "Purchase Order":
 		frappe.throw(_("This Gate Pass is not for a Purchase Order"))
 
-	# Get Purchase Order
-	po = frappe.get_doc("Purchase Order", gate_pass.reference_number)
 
 	# Create Purchase Receipt
 	pr = frappe.new_doc("Purchase Receipt")
@@ -566,6 +564,6 @@ def clear_gate_pass_reference(gate_pass_name, field_name):
 	except Exception as e:
 		frappe.log_error(
 			message=frappe.get_traceback(),
-			title=_("Error clearing Gate Pass reference")
+			title=_("Error clearing Gate Pass reference"),exception=e
 		)
 
