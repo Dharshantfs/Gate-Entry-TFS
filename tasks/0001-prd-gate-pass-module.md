@@ -50,13 +50,13 @@ In the initial stage, the module will focus on inward material movements (Gate I
    - Gate Pass ID (auto-generated with naming series) 2025-26/00001
    - Entry Type (Select: "Gate In" - for initial stage)
    - Gate Pass Date and Time (auto-populated with current date/time, editable)
-   - Status (Draft/Submitted/Receipt Created)
 
 2. The system **must** capture reference document information:
-   - Reference DocType (Select: "Purchase Order" or "Subcontracting Order")
-   - Reference Name (Link field based on selected DocType)
+   - Reference DocType (Link field based on DocType)
+   - Reference Number (Dynamic Link field based on selected DocType)
    - Supplier (auto-fetched from reference document)
    - Supplier Address (auto-fetched from reference document)
+   - Show the Address Display from the Reference Number document.
 
 3. The system **must** capture vehicle and personnel details:
    - Vehicle Number (Data field, mandatory)
@@ -96,7 +96,7 @@ In the initial stage, the module will focus on inward material movements (Gate I
 
 10. The system **must** validate that:
     - Received quantity is entered for at least one item
-    - Received quantity is greater than zero
+    - Received quantity is greater than zero in case of normal Purchase Orders, incase of Rate Contracts the quantity in Purchase Order will be 0 and will have a flag called 'has_unit_price_items' in that case the validation be relaxed.
 
 ### 4.3 Subcontracting Order Integration
 

@@ -7,42 +7,29 @@
  "engine": "InnoDB",
  "field_order": [
   "naming_series",
-  "section_break_kpdi",
+  "gate_pass_info_section",
+  "entry_type",
+  "gate_pass_date",
+  "gate_pass_time",
+  "company",
+  "reference_document_section",
   "document_reference",
   "reference_number",
-  "column_break_vhwx",
-  "enable_challan",
-  "invoice_no",
-  "invoice_date",
-  "challan_no",
-  "challan_date",
-  "section_break_evoi",
-  "custom_ui",
-  "section_break_idmh",
-  "gate_pass_table",
-  "security_details_section",
-  "entry_type",
-  "gate_pass_type",
+  "supplier",
+  "address_display",
+  "vehicle_personnel_section",
   "vehicle_number",
   "driver_name",
   "driver_contact",
-  "column_break_jbef",
-  "posting_date",
-  "posting_time",
-  "edit_posting",
-  "rgp_vehicle_number",
-  "company",
-  "gate_in__out_date_time_section",
-  "gate_in_date",
-  "gate_in_time",
-  "column_break_tepx",
-  "gate_out_date",
-  "gate_out_time",
-  "party_details_section",
-  "supplier",
-  "supplier_name",
-  "address_display",
-  "section_break_et5y",
+  "security_guard_name",
+  "gate_entry_date",
+  "gate_entry_time",
+  "material_details_section",
+  "custom_ui",
+  "gate_pass_table",
+  "receipt_references_section",
+  "purchase_receipt",
+  "subcontracting_receipt",
   "amended_from"
  ],
  "fields": [
@@ -54,55 +41,9 @@
    "reqd": 1
   },
   {
-   "fieldname": "section_break_kpdi",
+   "fieldname": "gate_pass_info_section",
    "fieldtype": "Section Break",
-   "label": "Document Reference"
-  },
-  {
-   "fieldname": "document_reference",
-   "fieldtype": "Link",
-   "label": "Document Reference",
-   "options": "DocType"
-  },
-  {
-   "fieldname": "reference_number",
-   "fieldtype": "Dynamic Link",
-   "label": "Reference Number",
-   "options": "document_reference"
-  },
-  {
-   "fieldname": "column_break_vhwx",
-   "fieldtype": "Column Break"
-  },
-  {
-   "depends_on": "eval:!doc.enable_challan;",
-   "fieldname": "invoice_no",
-   "fieldtype": "Data",
-   "label": "Invoice No.",
-   "mandatory_depends_on": "eval:!doc.enable_challan;",
-   "unique": 1
-  },
-  {
-   "depends_on": "eval:!doc.enable_challan;",
-   "fieldname": "invoice_date",
-   "fieldtype": "Date",
-   "label": "Invoice Date",
-   "mandatory_depends_on": "eval:!doc.enable_challan;"
-  },
-  {
-   "fieldname": "section_break_idmh",
-   "fieldtype": "Section Break"
-  },
-  {
-   "fieldname": "gate_pass_table",
-   "fieldtype": "Table",
-   "label": "Gate Entry Items",
-   "options": "Gate Pass Table"
-  },
-  {
-   "fieldname": "security_details_section",
-   "fieldtype": "Section Break",
-   "label": "Security Details"
+   "label": "Gate Pass Information"
   },
   {
    "default": "Gate In",
@@ -115,11 +56,65 @@
    "reqd": 1
   },
   {
-   "fieldname": "gate_pass_type",
+   "fieldname": "gate_pass_date",
+   "fieldtype": "Date",
+   "label": "Gate Pass Date",
+   "read_only": 1
+  },
+  {
+   "fieldname": "gate_pass_time",
+   "fieldtype": "Time",
+   "label": "Gate Pass Time",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company",
    "fieldtype": "Link",
-   "label": "Gate Pass Type",
-   "options": "Gate Pass Type",
+   "label": "Company",
+   "options": "Company",
    "reqd": 1
+  },
+  {
+   "fieldname": "reference_document_section",
+   "fieldtype": "Section Break",
+   "label": "Reference Document"
+  },
+  {
+   "fieldname": "document_reference",
+   "fieldtype": "Link",
+   "label": "Document Reference",
+   "options": "DocType",
+   "reqd": 1
+  },
+  {
+   "depends_on": "document_reference",
+   "fieldname": "reference_number",
+   "fieldtype": "Dynamic Link",
+   "label": "Reference Number",
+   "options": "document_reference",
+   "reqd": 1
+  },
+  {
+   "depends_on": "reference_number",
+   "fetch_from": "reference_number.supplier",
+   "fieldname": "supplier",
+   "fieldtype": "Link",
+   "label": "Supplier",
+   "options": "Supplier",
+   "read_only": 1
+  },
+  {
+   "depends_on": "reference_number",
+   "fetch_from": "reference_number.address_display",
+   "fieldname": "address_display",
+   "fieldtype": "Small Text",
+   "label": "Address Display",
+   "read_only": 1
+  },
+  {
+   "fieldname": "vehicle_personnel_section",
+   "fieldtype": "Section Break",
+   "label": "Vehicle & Personnel Details"
   },
   {
    "fieldname": "vehicle_number",
@@ -134,100 +129,48 @@
    "reqd": 1
   },
   {
-   "default": "+91-",
    "fieldname": "driver_contact",
    "fieldtype": "Phone",
    "label": "Driver Contact Number"
   },
   {
-   "fieldname": "column_break_jbef",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "posting_date",
-   "fieldtype": "Date",
-   "label": "Posting Date"
-  },
-  {
-   "fieldname": "posting_time",
-   "fieldtype": "Time",
-   "label": "Posting Time"
-  },
-  {
-   "default": "0",
-   "fieldname": "edit_posting",
-   "fieldtype": "Check",
-   "label": "Edit Posting Date and Time"
-  },
-  {
-   "fieldname": "rgp_vehicle_number",
+   "fieldname": "security_guard_name",
    "fieldtype": "Data",
-   "label": "Returned Vehicle No. (Incase of RGP)"
+   "label": "Security Guard Name",
+   "read_only": 1
   },
   {
-   "fieldname": "company",
-   "fieldtype": "Link",
-   "label": "Company",
-   "options": "Company"
-  },
-  {
-   "fieldname": "gate_in__out_date_time_section",
-   "fieldtype": "Section Break",
-   "label": "Gate IN / OUT Date Time"
-  },
-  {
-   "fieldname": "gate_in_date",
+   "fieldname": "gate_entry_date",
    "fieldtype": "Date",
-   "label": "Gate In Date"
+   "label": "Gate Entry Date",
+   "read_only": 1
   },
   {
-   "fieldname": "gate_in_time",
+   "fieldname": "gate_entry_time",
    "fieldtype": "Time",
-   "label": "Gate In Time"
+   "label": "Gate Entry Time",
+   "read_only": 1
   },
   {
-   "fieldname": "column_break_tepx",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "gate_out_date",
-   "fieldtype": "Date",
-   "label": "Gate Out Date"
-  },
-  {
-   "fieldname": "gate_out_time",
-   "fieldtype": "Time",
-   "label": "Gate Out Time"
-  },
-  {
-   "fieldname": "party_details_section",
+   "fieldname": "material_details_section",
    "fieldtype": "Section Break",
-   "label": "Party Details"
+   "label": "Material Details"
   },
   {
-   "fetch_from": "reference_number.supplier",
-   "fieldname": "supplier",
-   "fieldtype": "Link",
-   "label": "Supplier",
-   "options": "Supplier",
-   "read_only": 1
+   "fieldname": "custom_ui",
+   "fieldtype": "HTML",
+   "label": "Items List"
   },
   {
-   "fetch_from": "supplier.supplier_name",
-   "fieldname": "supplier_name",
-   "fieldtype": "Data",
-   "label": "Supplier Name",
-   "read_only": 1
+   "fieldname": "gate_pass_table",
+   "fieldtype": "Table",
+   "label": "Gate Entry Items",
+   "options": "Gate Pass Table"
   },
   {
-   "fieldname": "address_display",
-   "fieldtype": "Small Text",
-   "label": "Address Display",
-   "read_only": 1
-  },
-  {
-   "fieldname": "section_break_et5y",
-   "fieldtype": "Section Break"
+   "fieldname": "receipt_references_section",
+   "fieldtype": "Section Break",
+   "label": "Receipt References"
   },
   {
    "fieldname": "amended_from",
@@ -240,41 +183,42 @@
    "search_index": 1
   },
   {
-   "fieldname": "section_break_evoi",
-   "fieldtype": "Section Break",
-   "label": "HTML Section"
+   "allow_on_submit": 1,
+   "depends_on": "eval:doc.document_reference=='Purchase Order'",
+   "fieldname": "purchase_receipt",
+   "fieldtype": "Link",
+   "label": "Purchase Receipt Reference",
+   "no_copy": 1,
+   "options": "Purchase Receipt",
+   "read_only": 1,
+   "search_index": 1
   },
   {
-   "fieldname": "custom_ui",
-   "fieldtype": "HTML",
-   "label": "Custom Html Field"
-  },
-  {
-   "default": "0",
-   "fieldname": "enable_challan",
-   "fieldtype": "Check",
-   "label": "On Challan"
-  },
-  {
-   "depends_on": "eval:doc.enable_challan;",
-   "fieldname": "challan_no",
-   "fieldtype": "Data",
-   "label": "Challan No.",
-   "mandatory_depends_on": "eval:doc.enable_challan;"
-  },
-  {
-   "depends_on": "eval:doc.enable_challan;",
-   "fieldname": "challan_date",
-   "fieldtype": "Date",
-   "label": "Challan Date.",
-   "mandatory_depends_on": "eval:doc.enable_challan;"
+   "allow_on_submit": 1,
+   "depends_on": "eval:doc.document_reference=='Subcontracting Order'",
+   "fieldname": "subcontracting_receipt",
+   "fieldtype": "Link",
+   "label": "Subcontracting Receipt Reference",
+   "no_copy": 1,
+   "options": "Subcontracting Receipt",
+   "read_only": 1,
+   "search_index": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
- "links": [],
- "modified": "2025-10-20 11:56:05.943513",
+ "links": [
+  {
+   "link_doctype": "Purchase Receipt",
+   "link_fieldname": "gate_pass"
+  },
+  {
+   "link_doctype": "Subcontracting Receipt",
+   "link_fieldname": "gate_pass"
+  }
+ ],
+ "modified": "2025-10-28 16:16:59.427637",
  "modified_by": "Administrator",
  "module": "Gate Entry",
  "name": "Gate Pass",
