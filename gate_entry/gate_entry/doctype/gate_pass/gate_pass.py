@@ -438,7 +438,7 @@ def create_purchase_receipt(gate_pass_name):
 	gate_pass.purchase_receipt = pr.name
 	gate_pass.save(ignore_permissions=True)
 
-	frappe.db.commit()
+	# No manual commit needed - Frappe will auto-commit at end of request
 
 	return pr.name
 
@@ -502,7 +502,7 @@ def create_subcontracting_receipt(gate_pass_name):
 	gate_pass.subcontracting_receipt = sr.name
 	gate_pass.save(ignore_permissions=True)
 
-	frappe.db.commit()
+	# No manual commit needed - Frappe will auto-commit at end of request
 
 	return sr.name
 

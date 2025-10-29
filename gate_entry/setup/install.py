@@ -51,4 +51,5 @@ def create_gate_pass_custom_fields():
 	}
 
 	create_custom_fields(custom_fields, update=True)
+	# Manual commit in installation script to ensure fields are saved  # nosemgrep
 	frappe.db.commit()
