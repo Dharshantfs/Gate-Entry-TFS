@@ -76,6 +76,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-yarn-
 
+      - name: Install Software Properties
+        run: sudo apt-get install software-properties-common -y && sudo apt-key adv --fetch-keys 'https://mariadb.org/mariadb_release_signing_key.asc'
+
+      - name: Add MariaDB Repository
+        run: sudo add-apt-repository 'deb [arch=amd64] http://downloads.mariadb.com/MariaDB/mariadb-10.6/repo/ubuntu jammy main'
+
+      - name: Update Package Lists
+        run: sudo apt-get update
+
       - name: Install MariaDB Client
         run: sudo apt-get install mariadb-client-10.6
 
