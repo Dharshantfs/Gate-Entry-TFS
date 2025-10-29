@@ -8,8 +8,23 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 def after_install():
 	"""
 	Create custom fields after app installation
+	Note: This may fail silently if ERPNext is not installed yet.
+	Custom fields will be created when setup_custom_fields is run manually.
 	"""
-	create_gate_pass_custom_fields()
+	try:
+		create_gate_pass_custom_fields()
+	except Exception as e:
+		# Log error but don't fail installation if ERPNext doctypes don't exist yet
+		frappe.log_error(
+			message=f"Could not create custom fields during installation: {str(e)}\n"
+			"This is expected if ERPNext is not installed yet. "
+			"Run 'bench execute gate_entry.setup.setup_custom_fields.setup' after ERPNext is installed.",
+			title="Gate Entry Installation - Custom Fields Skipped",
+		)
+		print(
+			"Note: Custom fields not created. "
+			"Run 'bench execute gate_entry.setup.setup_custom_fields.setup' after ERPNext is installed."
+		)
 
 
 def create_gate_pass_custom_fields():

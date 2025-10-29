@@ -98,10 +98,16 @@ jobs:
       - name: Install
         working-directory: /home/runner/frappe-bench
         run: |
+          # Get ERPNext first (required dependency for gate_entry)
+          bench get-app erpnext --branch version-15
           bench get-app gate_entry $GITHUB_WORKSPACE
           bench setup requirements --dev
           bench new-site --db-root-password root --admin-password admin test_site
+          # Install ERPNext first, then gate_entry
+          bench --site test_site install-app erpnext
           bench --site test_site install-app gate_entry
+          # Create custom fields if not created during installation
+          bench --site test_site execute gate_entry.setup.setup_custom_fields.setup
           bench build
         env:
           CI: 'Yes'
