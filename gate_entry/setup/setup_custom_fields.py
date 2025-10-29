@@ -61,7 +61,8 @@ def create_gate_pass_custom_fields():
 	}
 
 	create_custom_fields(custom_fields, update=True)
-	# Manual commit in standalone script executed via bench execute  # nosemgrep
+	# Manual commit in standalone script executed via bench execute
+	# nosemgrep
 	frappe.db.commit()
 
 	print("Custom fields created:")
