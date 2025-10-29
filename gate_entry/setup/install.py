@@ -16,7 +16,7 @@ def after_install():
 	except Exception as e:
 		# Log error but don't fail installation if ERPNext doctypes don't exist yet
 		frappe.log_error(
-			message=f"Could not create custom fields during installation: {str(e)}\n"
+			message=f"Could not create custom fields during installation: {str(e)!r}\n"
 			"This is expected if ERPNext is not installed yet. "
 			"Run 'bench execute gate_entry.setup.setup_custom_fields.setup' after ERPNext is installed.",
 			title="Gate Entry Installation - Custom Fields Skipped",
