@@ -65,9 +65,8 @@ This task list implements the requirements defined in `0001-prd-gate-pass-module
   - [ ] 1.5 Ensure Vehicle Number and Driver Name fields are mandatory
   - [ ] 1.6 Add Driver Contact Number field (Phone type, optional)
   - [ ] 1.7 Update Security Guard Name field to auto-populate with current user (frappe.session.user)
-  - [ ] 1.8 Add/verify Gate Entry Time field (Time type, auto-populated)
+  - [ ] 1.8 Add/verify Gate Entry Date and Time field (Date type, Time type, auto-populated)
   - [ ] 1.9 Add Company field as mandatory (Link to Company)
-  - [ ] 1.10 Add status indicator fields: workflow_state or custom status field to track "Draft", "Submitted", "Receipt Created"
   - [ ] 1.11 Add reference fields to store created receipt details (purchase_receipt_reference, subcontracting_receipt_reference)
   - [ ] 1.12 Organize fields into logical sections as per PRD Design Considerations (4 main sections)
   - [ ] 1.13 Set proper field dependencies using `depends_on` expressions
@@ -81,7 +80,7 @@ This task list implements the requirements defined in `0001-prd-gate-pass-module
   - [ ] 2.5 Create `gate_entry/public/css/gate_pass.css` with styles for custom UI (modern, clean look)
   - [ ] 2.6 Implement color coding: red for items with pending quantity > 0, green for fully received items
   - [ ] 2.7 Add client-side validation to ensure only items from selected document reference can be added
-  - [ ] 2.8 Implement real-time quantity validation (prevent over-receipt, ensure qty > 0)
+  - [ ] 2.8 Implement real-time quantity validation (prevent over-receipt, ensure qty > 0) in case of normal purchase order, in case of Rate Contracts where the quantity will be 0 in purchase order and contain a flag 'has_unit_price_items' in that case it is not possible to calculate pending quantity, we can only know the received quantity. So the validation for Rate Contracts must be relaxed.
   - [ ] 2.9 Ensure mobile responsiveness for tablet/phone usage by security guards
   - [ ] 2.10 Sync custom UI data with hidden `gate_pass_table` child table field for backend processing
   - [ ] 2.11 Handle form refresh and data persistence when switching between draft saves

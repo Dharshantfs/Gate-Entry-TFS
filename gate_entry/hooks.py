@@ -8,7 +8,8 @@ app_license = "mit"
 # Apps
 # ------------------
 
-# required_apps = []
+# Gate Entry requires ERPNext as it adds custom fields to ERPNext doctypes
+required_apps = ["erpnext"]
 
 # Each item in the list will be shown as an app in the apps page
 # add_to_apps_screen = [
@@ -25,7 +26,7 @@ app_license = "mit"
 # ------------------
 
 # include js, css files in header of desk.html
-# app_include_css = "/assets/gate_entry/css/gate_entry.css"
+app_include_css = "/assets/gate_entry/css/gate_pass.css"
 # app_include_js = "/assets/gate_entry/js/gate_entry.js"
 
 # include js, css files in header of web template
@@ -43,7 +44,7 @@ app_license = "mit"
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-# doctype_js = {"doctype" : "public/js/doctype.js"}
+doctype_js = {"Gate Pass": "public/js/gate_pass_custom_ui.js"}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -83,7 +84,7 @@ app_license = "mit"
 # ------------
 
 # before_install = "gate_entry.install.before_install"
-# after_install = "gate_entry.install.after_install"
+after_install = "gate_entry.setup.install.after_install"
 
 # Uninstallation
 # ------------
@@ -136,14 +137,18 @@ app_license = "mit"
 # Document Events
 # ---------------
 # Hook on document methods and events
+# These handlers clean up Gate Pass references when receipts are deleted/cancelled
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+doc_events = {
+	"Purchase Receipt": {
+		"on_trash": "gate_entry.gate_entry.doctype.gate_pass.gate_pass.on_purchase_receipt_trash",
+		"on_cancel": "gate_entry.gate_entry.doctype.gate_pass.gate_pass.on_purchase_receipt_cancel",
+	},
+	"Subcontracting Receipt": {
+		"on_trash": "gate_entry.gate_entry.doctype.gate_pass.gate_pass.on_subcontracting_receipt_trash",
+		"on_cancel": "gate_entry.gate_entry.doctype.gate_pass.gate_pass.on_subcontracting_receipt_cancel",
+	},
+}
 
 # Scheduled Tasks
 # ---------------
@@ -191,8 +196,19 @@ app_license = "mit"
 
 # Ignore links to specified DocTypes when deleting documents
 # -----------------------------------------------------------
+# Allow Purchase Receipts and Subcontracting Receipts to be deleted
+# even if they have a link to Gate Pass
+ignore_links_on_delete = ["Gate Pass"]
 
-# ignore_links_on_delete = ["Communication", "ToDo"]
+# Document Links
+# -----------------------------------------------------------
+# Define connections between doctypes that will appear in the Connections section
+document_links = {
+	"Gate Pass": [
+		{"link_doctype": "Purchase Receipt", "link_fieldname": "gate_pass"},
+		{"link_doctype": "Subcontracting Receipt", "link_fieldname": "gate_pass"},
+	]
+}
 
 # Request Events
 # ----------------
@@ -241,4 +257,3 @@ app_license = "mit"
 # default_log_clearing_doctypes = {
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
-
