@@ -7,7 +7,6 @@ from frappe.model.document import Document
 from frappe.utils import flt, nowdate, nowtime
 
 
-
 class GatePass(Document):
 	def before_save(self):
 		"""
@@ -496,18 +495,15 @@ def create_purchase_receipt(gate_pass_name):
 			"item_group": po_item.item_group,
 			"brand": po_item.brand,
 			"image": po_item.image,
-
 			# UOM and conversion
 			"uom": po_item.uom,
 			"stock_uom": po_item.stock_uom,
 			"conversion_factor": conversion_factor,
-
 			# Quantities - from Gate Pass
 			"qty": received_qty,
 			"received_qty": received_qty,
 			"stock_qty": received_stock_qty,
 			"received_stock_qty": received_stock_qty,
-
 			# Pricing from PO (base values will be calculated by set_missing_values)
 			"rate": flt(po_item.rate),
 			"price_list_rate": flt(po_item.price_list_rate),
@@ -517,50 +513,45 @@ def create_purchase_receipt(gate_pass_name):
 			"discount_amount": flt(po_item.discount_amount),
 			"margin_type": po_item.margin_type,
 			"margin_rate_or_amount": flt(po_item.margin_rate_or_amount),
-
 			# Warehouse - prefer from Gate Pass, fallback to PO
 			"warehouse": gate_pass_item.warehouse or po_item.warehouse,
 			"from_warehouse": po_item.from_warehouse if po_item.get("from_warehouse") else None,
-
 			# Accounting from PO
 			"expense_account": po_item.expense_account,
 			"cost_center": po_item.cost_center,
-
 			# Reference fields from PO
 			"project": po_item.project if po_item.get("project") else None,
 			"schedule_date": po_item.schedule_date if po_item.get("schedule_date") else None,
-
 			# Material Request references
 			"material_request": po_item.material_request if po_item.get("material_request") else None,
-			"material_request_item": po_item.material_request_item if po_item.get("material_request_item") else None,
-
+			"material_request_item": po_item.material_request_item
+			if po_item.get("material_request_item")
+			else None,
 			# Sales Order references (for drop-ship scenarios)
 			"sales_order": po_item.sales_order if po_item.get("sales_order") else None,
 			"sales_order_item": po_item.sales_order_item if po_item.get("sales_order_item") else None,
-
 			# Manufacturing references
 			"bom": po_item.bom if po_item.get("bom") else None,
-			"wip_composite_asset": po_item.wip_composite_asset if po_item.get("wip_composite_asset") else None,
-
+			"wip_composite_asset": po_item.wip_composite_asset
+			if po_item.get("wip_composite_asset")
+			else None,
 			# Manufacturer details
 			"manufacturer": po_item.manufacturer if po_item.get("manufacturer") else None,
-			"manufacturer_part_no": po_item.manufacturer_part_no if po_item.get("manufacturer_part_no") else None,
+			"manufacturer_part_no": po_item.manufacturer_part_no
+			if po_item.get("manufacturer_part_no")
+			else None,
 			"supplier_part_no": po_item.supplier_part_no if po_item.get("supplier_part_no") else None,
-
 			# Asset fields
 			"is_fixed_asset": po_item.is_fixed_asset if po_item.get("is_fixed_asset") else 0,
 			"asset_location": po_item.asset_location if po_item.get("asset_location") else None,
 			"asset_category": po_item.asset_category if po_item.get("asset_category") else None,
-
 			# Tax
 			"item_tax_template": po_item.item_tax_template if po_item.get("item_tax_template") else None,
 			"item_tax_rate": po_item.item_tax_rate if po_item.get("item_tax_rate") else None,
 			"gst_treatment": po_item.gst_treatment if po_item.get("gst_treatment") else None,
-
 			# Other fields
 			"product_bundle": po_item.product_bundle if po_item.get("product_bundle") else None,
 			"is_free_item": po_item.is_free_item if po_item.get("is_free_item") else 0,
-
 			# Order linking - Critical for PO-PR linkage
 			"purchase_order": gate_pass.reference_number,
 			"purchase_order_item": gate_pass_item.order_item_name,
@@ -578,7 +569,7 @@ def create_purchase_receipt(gate_pass_name):
 
 	# Set missing values and calculate totals (mimics ERPNext's set_missing_values)
 	pr.run_method("set_missing_values")
-	#pr.run_method("calculate_taxes_and_totals")
+	# pr.run_method("calculate_taxes_and_totals")
 
 	pr.insert()
 
@@ -645,7 +636,6 @@ def create_subcontracting_receipt(gate_pass_name):
 		# Warehouse fields
 		"supplier_warehouse": "supplier_warehouse",
 		"set_warehouse": "set_warehouse",
-
 		# Address and contact fields
 		"supplier_address": "supplier_address",
 		"address_display": "address_display",
@@ -657,18 +647,14 @@ def create_subcontracting_receipt(gate_pass_name):
 		"shipping_address_display": "shipping_address_display",
 		"billing_address": "billing_address",
 		"billing_address_display": "billing_address_display",
-
 		# Project and cost center
 		"project": "project",
 		"cost_center": "cost_center",
-
 		# Print and display settings
 		"letter_head": "letter_head",
 		"select_print_heading": "select_print_heading",
-
 		# Additional costs
 		"distribute_additional_costs_based_on": "distribute_additional_costs_based_on",
-
 		# Critical: Purchase Order reference (needed for proper linking)
 		"purchase_order": "purchase_order",
 	}
@@ -695,58 +681,55 @@ def create_subcontracting_receipt(gate_pass_name):
 			"item_code": so_item.item_code,
 			"item_name": so_item.item_name,
 			"description": so_item.description,
-
 			# Brand and image (exist in SR Item)
 			"brand": so_item.brand if so_item.get("brand") else None,
 			"image": so_item.image if so_item.get("image") else None,
-
 			# UOM and conversion
 			"stock_uom": so_item.stock_uom,
 			"conversion_factor": conversion_factor,
-
 			# Quantities - from Gate Pass
 			"qty": received_qty,
 			"received_qty": received_qty,
 			"rejected_qty": rejected_qty,
-
 			# Pricing from Subcontracting Order Item
 			"rate": flt(so_item.rate),
-
 			# Cost breakdown fields (specific to subcontracting)
 			"rm_cost_per_qty": flt(so_item.rm_cost_per_qty) if so_item.get("rm_cost_per_qty") else 0,
-			"service_cost_per_qty": flt(so_item.service_cost_per_qty) if so_item.get("service_cost_per_qty") else 0,
-			"additional_cost_per_qty": flt(so_item.additional_cost_per_qty) if so_item.get("additional_cost_per_qty") else 0,
-
+			"service_cost_per_qty": flt(so_item.service_cost_per_qty)
+			if so_item.get("service_cost_per_qty")
+			else 0,
+			"additional_cost_per_qty": flt(so_item.additional_cost_per_qty)
+			if so_item.get("additional_cost_per_qty")
+			else 0,
 			# Warehouse - prefer from Gate Pass, fallback to Subcontracting Order
 			"warehouse": gate_pass_item.warehouse or so_item.warehouse,
-
 			# Accounting fields
 			"expense_account": so_item.expense_account if so_item.get("expense_account") else None,
 			"cost_center": so_item.cost_center if so_item.get("cost_center") else None,
-
 			# Reference fields
 			"project": so_item.project if so_item.get("project") else None,
 			"schedule_date": so_item.schedule_date if so_item.get("schedule_date") else None,
-
 			# Subcontracting specific fields - Critical for subcontracting workflow
 			"bom": so_item.bom,
-			"include_exploded_items": so_item.include_exploded_items if so_item.get("include_exploded_items") else 0,
-
+			"include_exploded_items": so_item.include_exploded_items
+			if so_item.get("include_exploded_items")
+			else 0,
 			# Manufacturer details
 			"manufacturer": so_item.manufacturer if so_item.get("manufacturer") else None,
-			"manufacturer_part_no": so_item.manufacturer_part_no if so_item.get("manufacturer_part_no") else None,
-
+			"manufacturer_part_no": so_item.manufacturer_part_no
+			if so_item.get("manufacturer_part_no")
+			else None,
 			# Other fields
 			"page_break": so_item.page_break if so_item.get("page_break") else 0,
 			"job_card": so_item.job_card if so_item.get("job_card") else None,
-
 			# Critical linking fields - Required for proper SO-SR linkage and status updates
 			"subcontracting_order": gate_pass.reference_number,
 			"subcontracting_order_item": gate_pass_item.order_item_name,
-
 			# Purchase Order references - Critical for proper linking to PO
 			"purchase_order": subcontracting_order.purchase_order,
-			"purchase_order_item": so_item.purchase_order_item if so_item.get("purchase_order_item") else None,
+			"purchase_order_item": so_item.purchase_order_item
+			if so_item.get("purchase_order_item")
+			else None,
 		}
 
 		# Add rejected_warehouse only if specified in Gate Pass
@@ -758,12 +741,15 @@ def create_subcontracting_receipt(gate_pass_name):
 	# Copy additional costs table if present
 	if subcontracting_order.get("additional_costs"):
 		for cost in subcontracting_order.additional_costs:
-			sr.append("additional_costs", {
-				"expense_account": cost.expense_account,
-				"description": cost.description,
-				"amount": cost.amount,
-				"base_amount": cost.base_amount if cost.get("base_amount") else None,
-			})
+			sr.append(
+				"additional_costs",
+				{
+					"expense_account": cost.expense_account,
+					"description": cost.description,
+					"amount": cost.amount,
+					"base_amount": cost.base_amount if cost.get("base_amount") else None,
+				},
+			)
 
 	# Set missing values and calculate totals
 	# This will populate supplied_items, calculate rates, and perform all necessary calculations
