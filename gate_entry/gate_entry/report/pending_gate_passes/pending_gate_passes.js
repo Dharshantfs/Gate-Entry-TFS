@@ -1,41 +1,42 @@
 frappe.query_reports["Pending Gate Passes"] = {
-    filters: [
-        {
-            fieldname: "from_date",
-            label: __("From Date"),
-            fieldtype: "Date",
-            default: frappe.datetime.add_months(frappe.datetime.get_today(), -1),
-        },
-        {
-            fieldname: "to_date",
-            label: __("To Date"),
-            fieldtype: "Date",
-            default: frappe.datetime.get_today(),
-        },
-        {
-            fieldname: "supplier",
-            label: __("Supplier"),
-            fieldtype: "Link",
-            options: "Supplier",
-        },
-        {
-            fieldname: "company",
-            label: __("Company"),
-            fieldtype: "Link",
-            options: "Company",
-            default: frappe.defaults.get_default("company"),
-        },
-    ],
+	filters: [
+		{
+			fieldname: "from_date",
+			label: __("From Date"),
+			fieldtype: "Date",
+			default: frappe.datetime.add_months(frappe.datetime.get_today(), -1),
+		},
+		{
+			fieldname: "to_date",
+			label: __("To Date"),
+			fieldtype: "Date",
+			default: frappe.datetime.get_today(),
+		},
+		{
+			fieldname: "supplier",
+			label: __("Supplier"),
+			fieldtype: "Link",
+			options: "Supplier",
+		},
+		{
+			fieldname: "company",
+			label: __("Company"),
+			fieldtype: "Link",
+			options: "Company",
+			default: frappe.defaults.get_default("company"),
+		},
+	],
 
-    formatter(value, row, column, data, default_formatter) {
-        value = default_formatter(value, column, data);
+	formatter(value, row, column, data, default_formatter) {
+		value = default_formatter(value, column, data);
 
-        if (column.fieldname === "aging" && data && data.aging !== undefined) {
-            const color = data.aging_color || (data.aging <= 0 ? "green" : data.aging <= 1 ? "orange" : "red");
-            value = `<span class="indicator-pill ${color}">${data.aging}</span>`;
-        }
+		if (column.fieldname === "aging" && data && data.aging !== undefined) {
+			const color =
+				data.aging_color ||
+				(data.aging <= 0 ? "green" : data.aging <= 1 ? "orange" : "red");
+			value = `<span class="indicator-pill ${color}">${data.aging}</span>`;
+		}
 
-        return value;
-    },
+		return value;
+	},
 };
-

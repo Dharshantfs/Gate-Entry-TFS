@@ -4,7 +4,6 @@
 import frappe
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
-
 REPORTS = (
 	"pending_gate_passes",
 	"gate_register",
