@@ -4,6 +4,12 @@
 import frappe
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
+REPORTS = (
+	"pending_gate_passes",
+	"gate_register",
+	"material_reconciliation",
+)
+
 
 def after_install():
 	"""
@@ -25,6 +31,14 @@ def after_install():
 			"Note: Custom fields not created. "
 			"Run 'bench execute gate_entry.setup.setup_custom_fields.setup' after ERPNext is installed."
 		)
+
+	ensure_reports()
+
+
+def after_migrate():
+	"""Ensure reports and custom fields exist after migrations."""
+
+	ensure_reports()
 
 
 def create_gate_pass_custom_fields():
@@ -67,5 +81,21 @@ def create_gate_pass_custom_fields():
 
 	create_custom_fields(custom_fields, update=True)
 	# Manual commit in installation script to ensure fields are saved
+	# nosemgrep
+	frappe.db.commit()
+
+
+def ensure_reports():
+	"""Reload script reports so they are available in the site."""
+
+	for report in REPORTS:
+		try:
+			frappe.reload_doc("gate_entry", "report", report)
+		except Exception as exc:
+			frappe.log_error(
+				message=f"Failed to reload Gate Entry report '{report}': {exc}",
+				title="Gate Entry Report Reload",
+			)
+	# Commit so the reports are persisted when running bench migrate/execute
 	# nosemgrep
 	frappe.db.commit()
