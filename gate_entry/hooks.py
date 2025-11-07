@@ -85,6 +85,7 @@ doctype_js = {"Gate Pass": "public/js/gate_pass_custom_ui.js"}
 
 # before_install = "gate_entry.install.before_install"
 after_install = "gate_entry.setup.install.after_install"
+after_migrate = "gate_entry.setup.install.after_migrate"
 
 # Uninstallation
 # ------------

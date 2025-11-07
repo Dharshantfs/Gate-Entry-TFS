@@ -1,0 +1,2 @@
+"""Gate Register report."""
+

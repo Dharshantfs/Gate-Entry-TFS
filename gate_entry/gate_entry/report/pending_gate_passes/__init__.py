@@ -1,0 +1,2 @@
+"""Pending Gate Passes report."""
+
