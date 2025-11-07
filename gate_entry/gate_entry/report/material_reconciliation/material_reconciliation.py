@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, NamedTuple
+from collections.abc import Iterable
+from typing import NamedTuple
 
 import frappe
 from frappe import _
