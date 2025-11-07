@@ -671,7 +671,6 @@ def create_subcontracting_receipt(gate_pass_name):
 
 		# Calculate quantities based on received quantity from Gate Pass
 		received_qty = flt(gate_pass_item.received_qty)
-		rejected_qty = flt(gate_pass_item.rejected_qty) if gate_pass_item.get("rejected_qty") else 0
 		conversion_factor = flt(so_item.conversion_factor) or 1.0
 
 		# Build Subcontracting Receipt Item with proper field mapping
@@ -690,7 +689,6 @@ def create_subcontracting_receipt(gate_pass_name):
 			# Quantities - from Gate Pass
 			"qty": received_qty,
 			"received_qty": received_qty,
-			"rejected_qty": rejected_qty,
 			# Pricing from Subcontracting Order Item
 			"rate": flt(so_item.rate),
 			# Cost breakdown fields (specific to subcontracting)
