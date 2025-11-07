@@ -207,7 +207,13 @@ document_links = {
 	"Gate Pass": [
 		{"link_doctype": "Purchase Receipt", "link_fieldname": "gate_pass"},
 		{"link_doctype": "Subcontracting Receipt", "link_fieldname": "gate_pass"},
-	]
+	],
+	"Purchase Receipt": [
+		{"link_doctype": "Gate Pass", "link_fieldname": "purchase_receipt"},
+	],
+	"Subcontracting Receipt": [
+		{"link_doctype": "Gate Pass", "link_fieldname": "subcontracting_receipt"},
+	],
 }
 
 # Request Events

@@ -36,7 +36,7 @@ class GatePassCustomUI {
 	}
 
 	/**
-	 * Load items from the child table
+	 * Load items from the child table with all fields
 	 */
 	load_items_from_table() {
 		this.items = [];
@@ -54,20 +54,41 @@ class GatePassCustomUI {
 			table_data: this.frm.doc.gate_pass_table,
 		});
 
-		// Load items from the child table
+		// Load items from the child table with all fields
 		if (this.frm.doc.gate_pass_table && this.frm.doc.gate_pass_table.length > 0) {
 			this.frm.doc.gate_pass_table.forEach((row) => {
 				// Only add items that have a valid item_code
 				if (row.item_code) {
 					this.items.push({
+						// Basic item details
 						item_code: row.item_code,
 						item_name: row.item_name || "",
 						description: row.description || "",
 						uom: row.uom || "",
+						stock_uom: row.stock_uom || "",
+						conversion_factor: row.conversion_factor || 1.0,
+						// Quantities
 						ordered_qty: row.ordered_qty || 0,
 						received_qty: row.received_qty || 0,
 						pending_qty: row.pending_qty || 0,
 						is_rate_contract: row.is_rate_contract || 0,
+						// Pricing details
+						rate: row.rate || 0,
+						amount: row.amount || 0,
+						// Warehouse and location
+						warehouse: row.warehouse || "",
+						rejected_warehouse: row.rejected_warehouse || "",
+						// Accounting details
+						expense_account: row.expense_account || "",
+						cost_center: row.cost_center || "",
+						// Reference details
+						project: row.project || "",
+						schedule_date: row.schedule_date || "",
+						// Other details (important for subcontracting and PO linking)
+						bom: row.bom || "",
+						include_exploded_items: row.include_exploded_items || 0,
+						order_item_name: row.order_item_name || "",
+						// Index for tracking
 						idx: row.idx,
 					});
 				} else {
@@ -90,17 +111,37 @@ class GatePassCustomUI {
 		// Clear existing rows
 		this.frm.clear_table("gate_pass_table");
 
-		// Add items to child table
+		// Add items to child table with all fields
 		this.items.forEach((item, index) => {
 			let row = this.frm.add_child("gate_pass_table");
+			// Basic item details
 			row.item_code = item.item_code;
 			row.item_name = item.item_name;
 			row.description = item.description || "";
 			row.uom = item.uom || "";
+			row.stock_uom = item.stock_uom || "";
+			row.conversion_factor = item.conversion_factor || 1.0;
+			// Quantities
 			row.ordered_qty = item.ordered_qty || 0;
 			row.received_qty = item.received_qty || 0;
 			row.pending_qty = item.pending_qty || 0;
 			row.is_rate_contract = item.is_rate_contract || 0;
+			// Pricing
+			row.rate = item.rate || 0;
+			row.amount = (item.received_qty || 0) * (item.rate || 0);
+			// Warehouse
+			row.warehouse = item.warehouse || "";
+			row.rejected_warehouse = item.rejected_warehouse || "";
+			// Accounting
+			row.expense_account = item.expense_account || "";
+			row.cost_center = item.cost_center || "";
+			// Reference
+			row.project = item.project || "";
+			row.schedule_date = item.schedule_date || "";
+			// Other details
+			row.bom = item.bom || "";
+			row.include_exploded_items = item.include_exploded_items || 0;
+			row.order_item_name = item.order_item_name || "";
 			row.idx = index + 1;
 		});
 
@@ -334,6 +375,7 @@ class GatePassCustomUI {
 			callback: function (r) {
 				if (r.message) {
 					self.available_items = r.message;
+					console.log("Available Items", self.available_items);
 					self.show_item_selector_dialog();
 				}
 			},
@@ -422,18 +464,40 @@ class GatePassCustomUI {
 	 * Add items to the list
 	 */
 	add_items(items_to_add) {
+		console.log("Items to add", items_to_add);
 		items_to_add.forEach((item) => {
 			this.items.push({
+				// Basic item details
 				item_code: item.item_code,
 				item_name: item.item_name,
 				description: item.description || "",
 				uom: item.uom || "",
+				stock_uom: item.stock_uom || "",
+				conversion_factor: item.conversion_factor || 1.0,
+				// Quantities
 				ordered_qty: item.ordered_qty || 0,
 				received_qty: 0, // Default to 0, user will enter
 				pending_qty: item.pending_qty || 0,
-				is_rate_contract: item.is_rate_contract || 0, // Rate Contract flag
+				is_rate_contract: item.is_rate_contract || 0,
+				// Pricing details
+				rate: item.rate || 0,
+				amount: 0, // Will be calculated when user enters received_qty
+				// Warehouse and location
+				warehouse: item.warehouse || "",
+				rejected_warehouse: item.rejected_warehouse || "",
+				// Accounting details
+				expense_account: item.expense_account || "",
+				cost_center: item.cost_center || "",
+				// Reference details
+				project: item.project || "",
+				schedule_date: item.schedule_date || "",
+				// Other details (important for subcontracting)
+				bom: item.bom || "",
+				include_exploded_items: item.include_exploded_items || 0,
+				order_item_name: item.order_item_name || "",
 			});
 		});
+		console.log("Items", this.items);
 
 		this.sync_to_child_table();
 		this.render();
@@ -487,8 +551,9 @@ class GatePassCustomUI {
 			});
 		}
 
-		// Update the item
+		// Update the item and recalculate amount
 		this.items[index].received_qty = value;
+		this.items[index].amount = value * (parseFloat(item.rate) || 0);
 
 		// Sync to child table
 		this.sync_to_child_table();

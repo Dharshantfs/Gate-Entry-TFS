@@ -14,8 +14,9 @@
   "company",
   "reference_document_section",
   "document_reference",
-  "reference_number",
-  "supplier",
+        "reference_number",
+        "supplier",
+        "supplier_delivery_note",
   "address_display",
   "vehicle_personnel_section",
   "vehicle_number",
@@ -102,6 +103,11 @@
    "label": "Supplier",
    "options": "Supplier",
    "read_only": 1
+  },
+  {
+   "fieldname": "supplier_delivery_note",
+   "fieldtype": "Data",
+   "label": "Supplier Delivery Note"
   },
   {
    "depends_on": "reference_number",
