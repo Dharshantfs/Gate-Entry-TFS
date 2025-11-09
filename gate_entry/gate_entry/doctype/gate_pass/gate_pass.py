@@ -447,9 +447,6 @@ def create_purchase_receipt(gate_pass_name):
 	pr = frappe.new_doc("Purchase Receipt")
 	pr.supplier = gate_pass.supplier
 	pr.company = gate_pass.company
-	pr.posting_date = gate_pass.gate_pass_date
-	pr.posting_time = gate_pass.gate_pass_time
-	pr.set_posting_time = 1
 	pr.gate_pass = gate_pass_name
 	if gate_pass.get("supplier_delivery_note"):
 		pr.supplier_delivery_note = gate_pass.supplier_delivery_note
@@ -619,11 +616,7 @@ def create_subcontracting_receipt(gate_pass_name):
 	# Primary fields
 	sr.supplier = subcontracting_order.supplier
 	sr.company = subcontracting_order.company
-
-	# Posting date/time from Gate Pass
-	sr.posting_date = gate_pass.gate_pass_date
-	sr.posting_time = gate_pass.gate_pass_time
-	sr.set_posting_time = 1
+	sr.vehicle_no = gate_pass.vehicle_number
 
 	# Reference to Gate Pass
 	sr.gate_pass = gate_pass_name
