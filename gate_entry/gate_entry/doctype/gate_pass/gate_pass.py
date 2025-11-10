@@ -8,10 +8,18 @@ from frappe.utils import flt, nowdate, nowtime
 
 
 class GatePass(Document):
+	def before_validate(self):
+		"""
+		Set derived values before validation
+		"""
+		self.set_entry_type()
+
 	def before_save(self):
 		"""
 		Auto-populate fields before saving
 		"""
+		self.set_entry_type()
+
 		# Auto-populate security guard name with current user
 		if not self.security_guard_name:
 			user_fullname = frappe.get_value("User", frappe.session.user, "full_name")
@@ -37,44 +45,342 @@ class GatePass(Document):
 			if cleaned_contact in ["+91", ""]:
 				self.driver_contact = None
 
+	def set_entry_type(self):
+		"""
+		Derive entry type from reference document
+		"""
+		if self.document_reference in ("Sales Invoice", "Delivery Note"):
+			self.entry_type = "Gate Out"
+		else:
+			self.entry_type = "Gate In"
+
+	def get_reference_doc(self):
+		"""
+		Lazy load and cache reference document
+		"""
+		if not (self.document_reference and self.reference_number):
+			return None
+
+		cached_doc = getattr(self, "_reference_doc_cache", None)
+		if cached_doc and cached_doc.doctype == self.document_reference and cached_doc.name == self.reference_number:
+			return cached_doc
+
+		self._reference_doc_cache = frappe.get_doc(self.document_reference, self.reference_number)
+
+		return self._reference_doc_cache
+
+	def populate_reference_defaults(self, reference_doc=None):
+		"""
+		Populate company, address, and transport details from reference doc when missing
+		"""
+		if not (self.document_reference and self.reference_number):
+			return
+
+		doc = reference_doc or self.get_reference_doc()
+		if not doc:
+			return
+
+		# Align company
+		if hasattr(doc, "company") and doc.company and not self.company:
+			self.company = doc.company
+
+		# Populate address when empty
+		if not self.address_display:
+			self.address_display = resolve_reference_address(doc, self.document_reference)
+
+		# Populate party details depending on flow
+		if self.document_reference in ("Purchase Order", "Subcontracting Order"):
+			if hasattr(doc, "supplier"):
+				self.supplier = doc.supplier
+			if hasattr(doc, "supplier_delivery_note") and doc.supplier_delivery_note:
+				self.supplier_delivery_note = doc.supplier_delivery_note
+		else:
+			self.supplier = None
+			self.supplier_delivery_note = None
+
+		# Populate transport fields for outbound documents
+		if self.document_reference in ("Sales Invoice", "Delivery Note"):
+			transport = extract_transport_details(doc)
+			self.set_transport_default("vehicle_number", transport.get("vehicle_number"), doc)
+			self.set_transport_default("driver_name", transport.get("driver_name"), doc)
+			self.set_transport_default("driver_contact", transport.get("driver_contact"), doc)
+
+	def set_transport_default(self, fieldname, value, reference_doc):
+		"""
+		Set transport field if missing and record auto-fill metadata for audit logging
+		"""
+		if not value or self.get(fieldname):
+			return
+
+		self.set(fieldname, value)
+		self.record_transport_autofill(fieldname, value, reference_doc)
+
+	def ensure_outbound_items(self):
+		"""
+		Populate gate pass items from outbound reference documents
+		"""
+		if self.document_reference not in ("Sales Invoice", "Delivery Note"):
+			return None, None
+
+		reference_doc = self.validate_reference_document()
+
+		if self.document_reference == "Sales Invoice":
+			reference_items = get_sales_invoice_items(self.reference_number)
+		else:
+			reference_items = get_delivery_note_items(self.reference_number)
+
+		if not reference_items:
+			frappe.throw(
+				_("{0} {1} does not have any items to dispatch").format(
+					self.document_reference, self.reference_number
+				)
+			)
+
+		# Replace the child table with reference items so guards cannot alter quantities
+		self.set("gate_pass_table", [])
+
+		for item in reference_items:
+			row = self.append("gate_pass_table", {})
+			row.item_code = item["item_code"]
+			row.item_name = item.get("item_name")
+			row.description = item.get("description")
+			row.uom = item.get("uom")
+			row.stock_uom = item.get("stock_uom")
+			row.conversion_factor = flt(item.get("conversion_factor") or 1.0)
+			row.ordered_qty = flt(item.get("ordered_qty"))
+			row.received_qty = 0
+			row.dispatched_qty = flt(item.get("dispatched_qty"))
+			row.pending_qty = flt(item.get("pending_qty"))
+			row.is_rate_contract = item.get("is_rate_contract") or 0
+			row.rate = flt(item.get("rate"))
+			row.amount = flt(item.get("amount"))
+			row.warehouse = item.get("warehouse")
+			row.rejected_warehouse = item.get("rejected_warehouse")
+			row.expense_account = item.get("expense_account")
+			row.cost_center = item.get("cost_center")
+			row.project = item.get("project")
+			row.schedule_date = item.get("schedule_date")
+			row.bom = item.get("bom")
+			row.include_exploded_items = item.get("include_exploded_items") or 0
+			row.order_item_name = item.get("order_item_name")
+
+		return reference_doc, reference_items
+
+	def validate_outbound_quantities(self, reference_items):
+		"""
+		Ensure dispatched quantities match the outbound reference document
+		"""
+		if not reference_items:
+			return
+
+		expected_map = {
+			make_reference_item_key(
+				item.get("item_code"), item.get("order_item_name"), item.get("warehouse")
+			): item
+			for item in reference_items
+		}
+
+		missing_keys = set(expected_map.keys())
+
+		for row in self.gate_pass_table:
+			key = make_reference_item_key(row.item_code, row.order_item_name, row.warehouse)
+			if key not in expected_map:
+				frappe.throw(
+					_("Item {0} is not part of the reference {1}").format(
+						row.item_code, self.document_reference
+					)
+				)
+
+			expected = expected_map[key]
+			if abs(flt(row.dispatched_qty) - flt(expected.get("dispatched_qty"))) > 1e-6:
+				frappe.throw(
+					_("Dispatched quantity for item {0} must match {1}").format(
+						row.item_code, flt(expected.get("dispatched_qty"))
+					)
+				)
+
+			missing_keys.discard(key)
+
+		if missing_keys:
+			frappe.throw(
+				_("Gate Pass is missing item rows for the reference document: {0}").format(
+					", ".join(missing_keys)
+				)
+			)
+
 	def validate(self):
 		"""
 		Validate the Gate Pass document
 		"""
+		reference_doc = None
+		reference_items = None
+
+		if self.document_reference in ("Sales Invoice", "Delivery Note"):
+			reference_doc, reference_items = self.ensure_outbound_items()
+
 		# Validate that at least one item exists
 		if not self.gate_pass_table or len(self.gate_pass_table) == 0:
 			frappe.throw(_("Please add at least one item to the Gate Pass"))
 
-		# Validate received quantities
-		for item in self.gate_pass_table:
-			if flt(item.received_qty) <= 0:
-				frappe.throw(
-					_("Received quantity for item {0} must be greater than zero").format(item.item_code)
-				)
+		# Validate quantities based on document type
+		if self.document_reference in ("Sales Invoice", "Delivery Note"):
+			for item in self.gate_pass_table:
+				if flt(item.dispatched_qty) <= 0:
+					frappe.throw(
+						_("Dispatched quantity for item {0} must be greater than zero").format(
+							item.item_code
+						)
+					)
+		else:
+			for item in self.gate_pass_table:
+				if flt(item.received_qty) <= 0:
+					frappe.throw(
+						_("Received quantity for item {0} must be greater than zero").format(
+							item.item_code
+						)
+					)
 
 		# Validate reference document
 		if self.document_reference and self.reference_number:
-			self.validate_reference_document()
+			reference_doc = reference_doc or self.validate_reference_document()
+			self.populate_reference_defaults(reference_doc)
+			self.ensure_company_matches_reference(reference_doc)
 
-		# Validate supplier matches reference document
-		self.validate_supplier()
+			if self.document_reference in ("Purchase Order", "Subcontracting Order"):
+				self.validate_supplier(reference_doc)
+			elif self.document_reference in ("Sales Invoice", "Delivery Note"):
+				expected_items = reference_items
+				if not expected_items:
+					if self.document_reference == "Sales Invoice":
+						expected_items = get_sales_invoice_items(self.reference_number)
+					else:
+						expected_items = get_delivery_note_items(self.reference_number)
+
+				self.validate_outbound_quantities(expected_items)
+
+	def record_transport_autofill(self, fieldname, value, reference_doc=None):
+		"""
+		Store metadata about auto-filled transport fields for later audit logging
+		"""
+		if not hasattr(self, "_transport_autofill"):
+			self._transport_autofill = {}
+
+		source = ""
+		if reference_doc:
+			source = f"{reference_doc.doctype} {reference_doc.name}"
+		elif self.document_reference and self.reference_number:
+			source = f"{self.document_reference} {self.reference_number}"
+
+		self._transport_autofill[fieldname] = {"value": value, "source": source}
+
+	def after_insert(self):
+		self.log_transport_autofill_comment()
+
+	def on_update(self):
+		self.log_transport_changes()
+
+	def log_transport_autofill_comment(self):
+		"""
+		Write a timeline comment when transport information is auto-filled
+		"""
+		autofill = getattr(self, "_transport_autofill", None)
+		if not autofill:
+			return
+
+		meta = self.meta
+		lines = []
+		for fieldname, details in autofill.items():
+			value = details.get("value")
+			if not value:
+				continue
+			label = meta.get_label(fieldname) if meta else fieldname.replace("_", " ").title()
+			source = details.get("source") or _("reference document")
+			lines.append(f"- {label}: {frappe.bold(value)} ({_('from')} {source})")
+
+		if lines:
+			message = _("Auto-filled transport details:\n{0}").format("\n".join(lines))
+			self.add_comment("Info", message)
+
+		# Clear to avoid duplicate comments on subsequent saves within same request
+		self._transport_autofill = {}
+
+	def log_transport_changes(self):
+		"""
+		Add timeline comments when transport details are modified after initial auto-fill
+		"""
+		doc_before = self.get_doc_before_save()
+		if not doc_before:
+			return
+
+		meta = self.meta
+		fields = ["vehicle_number", "driver_name", "driver_contact"]
+		changes = []
+
+		for field in fields:
+			old_value = doc_before.get(field)
+			new_value = self.get(field)
+			if old_value == new_value:
+				continue
+
+			label = meta.get_label(field) if meta else field.replace("_", " ").title()
+			if old_value and new_value:
+				changes.append(
+					_("{0} updated from {1} to {2}").format(
+						label, frappe.bold(old_value), frappe.bold(new_value)
+					)
+				)
+			elif not old_value and new_value:
+				changes.append(
+					_("{0} set to {1}").format(label, frappe.bold(new_value))
+				)
+			elif old_value and not new_value:
+				changes.append(
+					_("{0} cleared (previously {1})").format(label, frappe.bold(old_value))
+				)
+
+		if changes:
+			message = _("Transport details updated:\n{0}").format("\n".join(f"- {c}" for c in changes))
+			self.add_comment("Info", message)
+
+	def ensure_company_matches_reference(self, reference_doc):
+		"""
+		Ensure Gate Pass company aligns with reference document
+		"""
+		if not reference_doc or not hasattr(reference_doc, "company"):
+			return
+
+		reference_company = reference_doc.company
+		if not reference_company:
+			return
+
+		if not self.company:
+			self.company = reference_company
+		elif self.company != reference_company:
+			frappe.throw(
+				_("Company {0} does not match reference document company {1}").format(
+					self.company, reference_company
+				)
+			)
 
 	def validate_reference_document(self):
 		"""
 		Validate that the reference document is submitted
 		"""
-		doc = frappe.get_doc(self.document_reference, self.reference_number)
+		doc = self.get_reference_doc()
 		if doc.docstatus != 1:
 			frappe.throw(_("Reference document {0} must be submitted").format(self.reference_number))
+		return doc
 
-	def validate_supplier(self):
+	def validate_supplier(self, reference_doc=None):
 		"""
 		Validate that supplier matches the reference document supplier
 		"""
-		if self.document_reference and self.reference_number and self.supplier:
-			doc = frappe.get_doc(self.document_reference, self.reference_number)
-			if hasattr(doc, "supplier") and doc.supplier != self.supplier:
-				frappe.throw(_("Supplier does not match the reference document"))
+		if not (self.document_reference and self.reference_number and self.supplier):
+			return
+
+		doc = reference_doc or self.get_reference_doc()
+		if hasattr(doc, "supplier") and doc.supplier != self.supplier:
+			frappe.throw(_("Supplier does not match the reference document"))
 
 	def on_submit(self):
 		"""
@@ -242,6 +548,10 @@ def get_items(document_reference, reference_number):
 		items = get_purchase_order_items(reference_number)
 	elif document_reference == "Subcontracting Order":
 		items = get_subcontracting_order_items(reference_number)
+	elif document_reference == "Sales Invoice":
+		items = get_sales_invoice_items(reference_number)
+	elif document_reference == "Delivery Note":
+		items = get_delivery_note_items(reference_number)
 	else:
 		frappe.throw(_("Unsupported Document Reference: {0}").format(document_reference))
 
@@ -285,6 +595,7 @@ def get_purchase_order_items(purchase_order):
 				"conversion_factor": flt(po_item.conversion_factor) or 1.0,
 				"ordered_qty": ordered_qty,
 				"received_qty": flt(total_received),
+				"dispatched_qty": 0,
 				"pending_qty": max(0, pending_qty),
 				"is_rate_contract": is_rate_contract,
 				# Pricing details
@@ -334,6 +645,7 @@ def get_subcontracting_order_items(subcontracting_order):
 				"conversion_factor": flt(so_item.conversion_factor) or 1.0,
 				"ordered_qty": ordered_qty,
 				"received_qty": total_received,
+				"dispatched_qty": 0,
 				"pending_qty": max(0, pending_qty),
 				"is_rate_contract": False,  # Subcontracting orders are not rate contracts
 				# Pricing details
@@ -356,6 +668,135 @@ def get_subcontracting_order_items(subcontracting_order):
 		)
 
 	return items
+
+
+def get_sales_invoice_items(sales_invoice):
+	"""
+	Get items from Sales Invoice for outbound gate processing
+	"""
+	si_doc = frappe.get_doc("Sales Invoice", sales_invoice)
+
+	items = []
+	for si_item in si_doc.get("items", []):
+		quantity = flt(si_item.qty)
+		items.append(
+			{
+				"item_code": si_item.item_code,
+				"item_name": si_item.item_name or "",
+				"description": si_item.description or "",
+				"uom": si_item.uom,
+				"stock_uom": si_item.stock_uom,
+				"conversion_factor": flt(si_item.conversion_factor) or 1.0,
+				"ordered_qty": quantity,
+				"received_qty": 0,
+				"dispatched_qty": quantity,
+				"pending_qty": 0,
+				"is_rate_contract": 0,
+				"rate": flt(si_item.rate),
+				"amount": flt(si_item.amount),
+				"warehouse": si_item.warehouse,
+				"rejected_warehouse": None,
+				"expense_account": "",
+				"cost_center": si_item.cost_center,
+				"project": si_item.project,
+				"schedule_date": getattr(si_item, "delivery_date", None),
+				"bom": getattr(si_item, "bom", None),
+				"include_exploded_items": getattr(si_item, "include_exploded_items", 0),
+				"order_item_name": si_item.name,
+			}
+		)
+
+	return items
+
+
+def get_delivery_note_items(delivery_note):
+	"""
+	Get items from Delivery Note for outbound gate processing
+	"""
+	dn_doc = frappe.get_doc("Delivery Note", delivery_note)
+
+	items = []
+	for dn_item in dn_doc.get("items", []):
+		quantity = flt(dn_item.qty)
+		items.append(
+			{
+				"item_code": dn_item.item_code,
+				"item_name": dn_item.item_name or "",
+				"description": dn_item.description or "",
+				"uom": dn_item.uom,
+				"stock_uom": dn_item.stock_uom,
+				"conversion_factor": flt(dn_item.conversion_factor) or 1.0,
+				"ordered_qty": quantity,
+				"received_qty": 0,
+				"dispatched_qty": quantity,
+				"pending_qty": 0,
+				"is_rate_contract": 0,
+				"rate": flt(dn_item.rate),
+				"amount": flt(dn_item.amount),
+				"warehouse": dn_item.target_warehouse or dn_item.warehouse,
+				"rejected_warehouse": None,
+				"expense_account": "",
+				"cost_center": dn_item.cost_center,
+				"project": dn_item.project,
+				"schedule_date": getattr(dn_item, "schedule_date", None),
+				"bom": getattr(dn_item, "bom", None),
+				"include_exploded_items": getattr(dn_item, "include_exploded_items", 0),
+				"order_item_name": dn_item.name,
+			}
+		)
+
+	return items
+
+
+def extract_transport_details(doc):
+	"""
+	Extract vehicle and driver details from reference documents
+	"""
+	return {
+		"vehicle_number": doc.get("vehicle_number")
+		or doc.get("vehicle_no")
+		or doc.get("vehicle"),
+		"driver_name": doc.get("driver_name") or doc.get("driver"),
+		"driver_contact": doc.get("driver_contact")
+		or doc.get("driver_mobile_no")
+		or doc.get("driver_contact_number")
+		or doc.get("driver_mobile")
+		or doc.get("driver_phone")
+		or doc.get("contact_phone"),
+	}
+
+
+def resolve_reference_address(doc, document_reference):
+	"""
+	Resolve address display for various reference document types
+	"""
+	if not doc:
+		return ""
+
+	if document_reference in ("Purchase Order", "Subcontracting Order"):
+		return doc.get("address_display") or ""
+
+	if document_reference == "Sales Invoice":
+		return (
+			doc.get("shipping_address_display")
+			or doc.get("address_display")
+			or doc.get("customer_address")
+			or ""
+		)
+
+	if document_reference == "Delivery Note":
+		return doc.get("shipping_address_display") or doc.get("address_display") or ""
+
+	return ""
+
+
+def make_reference_item_key(item_code, order_item_name=None, warehouse=None):
+	"""
+	Build a stable key for mapping reference items and gate pass rows
+	"""
+	if order_item_name:
+		return order_item_name
+	return f"{item_code or ''}::{warehouse or ''}"
 
 
 def get_gate_pass_received_qty(reference_number, item_code, document_reference="Purchase Order"):
@@ -407,8 +848,108 @@ def get_address(document_reference, reference_number):
 	elif document_reference == "Subcontracting Order":
 		so = frappe.get_value("Subcontracting Order", reference_number, "address_display")
 		address = so or ""
+	elif document_reference == "Sales Invoice":
+		address_fields = frappe.db.get_value(
+			"Sales Invoice",
+			reference_number,
+			["shipping_address_display", "address_display", "customer_address"],
+			as_dict=True,
+		)
+		if address_fields:
+			address = (
+				address_fields.get("shipping_address_display")
+				or address_fields.get("address_display")
+				or address_fields.get("customer_address")
+				or ""
+			)
+	elif document_reference == "Delivery Note":
+		address_fields = frappe.db.get_value(
+			"Delivery Note",
+			reference_number,
+			["shipping_address_display", "address_display"],
+			as_dict=True,
+		)
+		if address_fields:
+			address = (
+				address_fields.get("shipping_address_display")
+				or address_fields.get("address_display")
+				or ""
+			)
 
 	return address
+
+
+@frappe.whitelist()
+def get_reference_details(document_reference, reference_number):
+	"""
+	Fetch header-level details from the reference document to prefill gate pass fields
+	"""
+	if not document_reference or not reference_number:
+		frappe.throw(_("Document Reference and Reference Number are required"))
+
+	if not frappe.has_permission(document_reference, "read"):
+		frappe.throw(_("You don't have permission to access {0}").format(document_reference))
+
+	doc = frappe.get_doc(document_reference, reference_number)
+	transport = extract_transport_details(doc)
+
+	details = {
+		"company": getattr(doc, "company", None),
+		"address_display": resolve_reference_address(doc, document_reference),
+		"vehicle_number": transport.get("vehicle_number"),
+		"driver_name": transport.get("driver_name"),
+		"driver_contact": transport.get("driver_contact"),
+		"posting_date": getattr(doc, "posting_date", None),
+		"posting_time": getattr(doc, "posting_time", None),
+		"document_date": getattr(doc, "transaction_date", None)
+		if hasattr(doc, "transaction_date")
+		else getattr(doc, "posting_date", None),
+	}
+
+	if document_reference in ("Purchase Order", "Subcontracting Order"):
+		details.update(
+			{
+				"party_type": "Supplier",
+				"party": getattr(doc, "supplier", None),
+				"party_name": getattr(doc, "supplier_name", None),
+				"supplier": getattr(doc, "supplier", None),
+				"supplier_delivery_note": getattr(doc, "supplier_delivery_note", None),
+			}
+		)
+	elif document_reference in ("Sales Invoice", "Delivery Note"):
+		details.update(
+			{
+				"party_type": "Customer",
+				"party": getattr(doc, "customer", None),
+				"party_name": getattr(doc, "customer_name", None),
+				"customer": getattr(doc, "customer", None),
+			}
+		)
+
+	return details
+
+
+@frappe.whitelist()
+def get_outbound_compliance_status(document_reference, reference_number, gate_pass=None):
+	"""
+	Return compliance information for outbound gate passes.
+
+	This is a lightweight helper that allows the frontend to display status banners.
+	The detailed validation logic is implemented during document validation/submission.
+	"""
+	if document_reference not in ("Sales Invoice", "Delivery Note"):
+		return None
+
+	# Placeholder response; detailed compliance enforcement is handled during validation.
+	# Future enhancements should extend this method to surface specific warnings/errors.
+	return {
+		"level": "info",
+		"title": _("Compliance checks pending"),
+		"messages": [
+			_("Compliance validation will run during Gate Pass submission."),
+			_("Ensure e-invoice and e-way bill are generated before proceeding."),
+		],
+	}
 
 
 @frappe.whitelist()

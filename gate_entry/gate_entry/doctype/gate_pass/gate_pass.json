@@ -27,6 +27,7 @@
   "gate_entry_time",
   "material_details_section",
   "custom_ui",
+  "compliance_status_html",
   "gate_pass_table",
   "receipt_references_section",
   "purchase_receipt",
@@ -96,8 +97,7 @@
    "reqd": 1
   },
   {
-   "depends_on": "reference_number",
-   "fetch_from": "reference_number.supplier",
+   "depends_on": "eval:doc.document_reference in ['Purchase Order', 'Subcontracting Order']",
    "fieldname": "supplier",
    "fieldtype": "Link",
    "label": "Supplier",
@@ -105,6 +105,7 @@
    "read_only": 1
   },
   {
+   "depends_on": "eval:doc.document_reference in ['Purchase Order', 'Subcontracting Order']",
    "fieldname": "supplier_delivery_note",
    "fieldtype": "Data",
    "label": "Supplier Delivery Note"
@@ -167,11 +168,18 @@
    "fieldtype": "HTML",
    "label": "Items List"
   },
+ {
+  "fieldname": "compliance_status_html",
+  "fieldtype": "HTML",
+  "label": "Compliance Status",
+  "read_only": 1
+ },
   {
    "fieldname": "gate_pass_table",
    "fieldtype": "Table",
    "label": "Gate Entry Items",
-   "options": "Gate Pass Table"
+  "options": "Gate Pass Table",
+  "hidden": 1
   },
   {
    "fieldname": "receipt_references_section",

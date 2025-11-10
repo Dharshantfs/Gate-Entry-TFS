@@ -18,6 +18,8 @@ class GatePassCustomUI {
 		this.items = [];
 		this.available_items = [];
 		this.wrapper = null;
+		this.precision = 3;
+		this._resizeHandlerBound = false;
 		this.init();
 	}
 
@@ -33,6 +35,7 @@ class GatePassCustomUI {
 		this.wrapper = this.frm.fields_dict.custom_ui.$wrapper;
 		this.render();
 		this.setup_event_listeners();
+		this.setup_responsive_listener();
 	}
 
 	/**
@@ -70,6 +73,7 @@ class GatePassCustomUI {
 						// Quantities
 						ordered_qty: row.ordered_qty || 0,
 						received_qty: row.received_qty || 0,
+						dispatched_qty: row.dispatched_qty || 0,
 						pending_qty: row.pending_qty || 0,
 						is_rate_contract: row.is_rate_contract || 0,
 						// Pricing details
@@ -124,11 +128,14 @@ class GatePassCustomUI {
 			// Quantities
 			row.ordered_qty = item.ordered_qty || 0;
 			row.received_qty = item.received_qty || 0;
+			row.dispatched_qty = item.dispatched_qty || 0;
 			row.pending_qty = item.pending_qty || 0;
 			row.is_rate_contract = item.is_rate_contract || 0;
 			// Pricing
 			row.rate = item.rate || 0;
-			row.amount = (item.received_qty || 0) * (item.rate || 0);
+			const qty_for_amount =
+				(this.isOutbound() ? item.dispatched_qty : item.received_qty) || 0;
+			row.amount = qty_for_amount * (item.rate || 0);
 			// Warehouse
 			row.warehouse = item.warehouse || "";
 			row.rejected_warehouse = item.rejected_warehouse || "";
@@ -194,6 +201,20 @@ class GatePassCustomUI {
 			`;
 		}
 
+		if (this.isOutbound()) {
+			const referenceLabel =
+				this.frm.doc.document_reference === "Sales Invoice" ? __("Sales Invoice") : __("Delivery Note");
+
+			return `
+				<div class="alert alert-info outbound-note">
+					<i class="fa fa-info-circle"></i>
+					${__("Items and dispatched quantities are loaded automatically from the {0}. Editing is disabled.", [
+						referenceLabel,
+					])}
+				</div>
+			`;
+		}
+
 		return `
 			<button class="btn btn-sm btn-primary add-item-btn" type="button">
 				<i class="fa fa-plus"></i> Add Item
@@ -224,7 +245,10 @@ class GatePassCustomUI {
 			return this.render_empty_state();
 		}
 
-		let items_html = this.items
+		if (this.isOutbound()) {
+			return this.render_outbound_items();
+		} else{
+			let items_html = this.items
 			.map((item, index) => {
 				return this.render_item_row(item, index);
 			})
@@ -243,12 +267,17 @@ class GatePassCustomUI {
 				</div>
 			</div>
 		`;
+		}
 	}
 
 	/**
 	 * Render a single item row
 	 */
 	render_item_row(item, index) {
+		if (this.isOutbound()) {
+			return "";
+		}
+
 		const is_rate_contract = item.is_rate_contract || 0;
 		const pending_qty = parseFloat(item.pending_qty || 0);
 		const received_qty = parseFloat(item.received_qty || 0);
@@ -307,6 +336,19 @@ class GatePassCustomUI {
 	bind_events() {
 		const self = this;
 
+		// Info buttons
+		this.wrapper
+			.find(".info-btn")
+			.off("click")
+			.on("click", function () {
+				const index = $(this).data("index");
+				self.show_item_details(index);
+			});
+
+		if (this.isOutbound()) {
+			return;
+		}
+
 		// Add item button
 		this.wrapper
 			.find(".add-item-btn")
@@ -322,15 +364,6 @@ class GatePassCustomUI {
 			.on("click", function () {
 				const index = $(this).data("index");
 				self.remove_item(index);
-			});
-
-		// Info buttons
-		this.wrapper
-			.find(".info-btn")
-			.off("click")
-			.on("click", function () {
-				const index = $(this).data("index");
-				self.show_item_details(index);
 			});
 
 		// Received quantity inputs
@@ -358,6 +391,10 @@ class GatePassCustomUI {
 	 * Show dialog to add items
 	 */
 	show_add_item_dialog() {
+		if (this.isOutbound()) {
+			return;
+		}
+
 		const self = this;
 
 		if (!this.frm.doc.reference_number || !this.frm.doc.document_reference) {
@@ -477,6 +514,7 @@ class GatePassCustomUI {
 				// Quantities
 				ordered_qty: item.ordered_qty || 0,
 				received_qty: 0, // Default to 0, user will enter
+				dispatched_qty: item.dispatched_qty || 0,
 				pending_qty: item.pending_qty || 0,
 				is_rate_contract: item.is_rate_contract || 0,
 				// Pricing details
@@ -507,6 +545,10 @@ class GatePassCustomUI {
 	 * Remove an item from the list
 	 */
 	remove_item(index) {
+		if (this.isOutbound()) {
+			return;
+		}
+
 		const item = this.items[index];
 
 		frappe.confirm(__("Are you sure you want to remove {0}?", [item.item_code]), () => {
@@ -524,6 +566,10 @@ class GatePassCustomUI {
 	 * Update received quantity for an item
 	 */
 	update_received_qty(index, value) {
+		if (this.isOutbound()) {
+			return;
+		}
+
 		if (index < 0 || index >= this.items.length) return;
 
 		// Validate quantity
@@ -566,6 +612,10 @@ class GatePassCustomUI {
 	 * Real-time validation for quantity input
 	 */
 	validate_quantity_input(index, value, input_element) {
+		if (this.isOutbound()) {
+			return;
+		}
+
 		const item = this.items[index];
 		const pending_qty = parseFloat(item.pending_qty || 0);
 		const is_rate_contract = item.is_rate_contract || 0;
@@ -587,7 +637,7 @@ class GatePassCustomUI {
 	show_item_details(index) {
 		const item = this.items[index];
 		const is_rate_contract = item.is_rate_contract || 0;
-
+		const is_outbound = this.isOutbound();
 		let fields = [
 			{
 				fieldtype: "Data",
@@ -623,38 +673,48 @@ class GatePassCustomUI {
 		];
 
 		// Add order type information
-		if (is_rate_contract) {
-			fields.push({
-				fieldtype: "Data",
-				fieldname: "order_type",
-				label: __("Order Type"),
-				read_only: 1,
-				default: "Rate Contract",
-			});
-		} else {
+		if(is_outbound) {
 			fields.push({
 				fieldtype: "Float",
-				fieldname: "ordered_qty",
-				label: __("Ordered Qty"),
+				fieldname: "dispatched_qty",
+				label: __("Dispatched Qty"),
 				read_only: 1,
-				default: item.ordered_qty || 0,
+				default: item.dispatched_qty || 0,
 			});
+		} else{
+			if (is_rate_contract) {
+				fields.push({
+					fieldtype: "Data",
+					fieldname: "order_type",
+					label: __("Order Type"),
+					read_only: 1,
+					default: "Rate Contract",
+				});
+			} else {
+				fields.push({
+					fieldtype: "Float",
+					fieldname: "ordered_qty",
+					label: __("Ordered Qty"),
+					read_only: 1,
+					default: item.ordered_qty || 0,
+				});
+				fields.push({
+					fieldtype: "Float",
+					fieldname: "pending_qty",
+					label: __("Pending Qty"),
+					read_only: 1,
+					default: item.pending_qty || 0,
+				});
+			}
+
 			fields.push({
 				fieldtype: "Float",
-				fieldname: "pending_qty",
-				label: __("Pending Qty"),
+				fieldname: "received_qty",
+				label: __("Received Qty"),
 				read_only: 1,
-				default: item.pending_qty || 0,
+				default: item.received_qty || 0,
 			});
 		}
-
-		fields.push({
-			fieldtype: "Float",
-			fieldname: "received_qty",
-			label: __("Received Qty"),
-			read_only: 1,
-			default: item.received_qty || 0,
-		});
 
 		const dialog = new frappe.ui.Dialog({
 			title: __("Item Details"),
@@ -677,6 +737,34 @@ class GatePassCustomUI {
 	}
 
 	/**
+	 * Ensure layout recalculates on viewport changes (e.g., mobile rotation)
+	 */
+	setup_responsive_listener() {
+		if (this._resizeHandlerBound) {
+			return;
+		}
+
+		this._resizeHandlerBound = true;
+
+		this._resizeHandler = frappe.utils.debounce
+			? frappe.utils.debounce(() => this.render(), 300)
+			: () => this.render();
+
+		$(window).on("resize.gate_pass_ui orientationchange.gate_pass_ui", this._resizeHandler);
+
+		// Refresh listener is handled via frappe hooks in setup_event_listeners
+	}
+
+	teardown_responsive_listener() {
+		if (!this._resizeHandlerBound) {
+			return;
+		}
+
+		$(window).off("resize.gate_pass_ui orientationchange.gate_pass_ui", this._resizeHandler);
+		this._resizeHandlerBound = false;
+	}
+
+	/**
 	 * Refresh the UI
 	 */
 	refresh() {
@@ -684,6 +772,64 @@ class GatePassCustomUI {
 		setTimeout(() => {
 			this.render();
 		}, 100);
+	}
+
+	isOutbound() {
+		const reference = this.frm?.doc?.document_reference;
+		return reference ? ["Sales Invoice", "Delivery Note"].includes(reference) : false;
+	}
+
+	render_outbound_items() {
+		return `
+			<div class="items-list outbound-items-list">
+				<div class="items-list-header outbound-items-header">
+					<div class="item-col item-code-col">${__("Item Code")}</div>
+					<div class="item-col item-name-col">${__("Item Name")}</div>
+					<div class="item-col received-qty-col">${__("Dispatched Qty")}</div>
+					<div class="item-col actions-col">${__("Actions")}</div>
+				</div>
+				<div class="items-list-body outbound-items-body">
+					${this.items
+						.map((item, idx) => {
+							const tooltip =
+								item.item_code && item.item_code !== item.item_name
+									? `title="${frappe.utils.escape_html(item.item_code)}"`
+									: "";
+							return `
+								<div class="item-row outbound-row" ${tooltip}>
+					<div class="item-col item-code-col">
+						<span class="item-code">${frappe.utils.escape_html(item.item_code || "")}</span>
+					</div>
+					<div class="item-col item-name-col outbound-name">
+						<span class="item-name">${frappe.utils.escape_html(item.item_name || item.item_code || "")}</span>
+					</div>
+					<div class="item-col received-qty-col outbound-qty-col">
+						<span class="outbound-qty-value">${this.formatQuantity(item.dispatched_qty)}</span>
+						${
+							item.uom
+								? `<span class="outbound-qty-uom">${frappe.utils.escape_html(item.uom)}</span>`
+								: ""
+						}
+					</div>
+					<div class="item-col actions-col outbound-actions">
+						<button class="btn btn-xs btn-info info-btn" data-index="${idx}" title="View Details">
+							<i class="fa fa-info-circle"></i>
+						</button>
+					</div>
+								</div>
+							`;
+						})
+						.join("")}
+				</div>
+			</div>
+		`;
+	}
+
+	formatQuantity(value) {
+		const number = frappe.utils.flt ? frappe.utils.flt(value || 0) : parseFloat(value || 0);
+		return frappe.format
+			? frappe.format(number, { fieldtype: "Float", precision: this.precision })
+			: (number || 0).toFixed(this.precision);
 	}
 }
 
