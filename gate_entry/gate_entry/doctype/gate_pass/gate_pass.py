@@ -6,8 +6,19 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint, cstr, flt, nowdate, nowtime
 
+from gate_entry.constants import (
+	INBOUND_REFERENCES,
+	OUTBOUND_REFERENCES,
+	REFERENCE_TOTAL_FIELDS,
+)
 
 class GatePass(Document):
+	def is_outbound_reference(self):
+		return self.document_reference in OUTBOUND_REFERENCES
+
+	def is_inbound_reference(self):
+		return self.document_reference in INBOUND_REFERENCES
+
 	def before_validate(self):
 		"""
 		Set derived values before validation
@@ -49,7 +60,7 @@ class GatePass(Document):
 		"""
 		Derive entry type from reference document
 		"""
-		if self.document_reference in ("Sales Invoice", "Delivery Note"):
+		if self.is_outbound_reference():
 			self.entry_type = "Gate Out"
 		else:
 			self.entry_type = "Gate In"
@@ -93,7 +104,7 @@ class GatePass(Document):
 			self.address_display = resolve_reference_address(doc, self.document_reference)
 
 		# Populate party details depending on flow
-		if self.document_reference in ("Purchase Order", "Subcontracting Order"):
+		if self.is_inbound_reference():
 			if hasattr(doc, "supplier"):
 				self.supplier = doc.supplier
 			if hasattr(doc, "supplier_delivery_note") and doc.supplier_delivery_note:
@@ -104,7 +115,7 @@ class GatePass(Document):
 			self.supplier_delivery_note = None
 
 		# Populate transport fields for outbound documents
-		if self.document_reference in ("Sales Invoice", "Delivery Note"):
+		if self.is_outbound_reference():
 			transport = extract_transport_details(doc)
 			self.set_transport_default("vehicle_number", transport.get("vehicle_number"), doc)
 			self.set_transport_default("driver_name", transport.get("driver_name"), doc)
@@ -126,7 +137,7 @@ class GatePass(Document):
 		"""
 		Populate gate pass items from outbound reference documents
 		"""
-		if self.document_reference not in ("Sales Invoice", "Delivery Note"):
+		if not self.is_outbound_reference():
 			return None, None
 
 		reference_doc = self.validate_reference_document()
@@ -222,7 +233,7 @@ class GatePass(Document):
 		reference_doc = None
 		reference_items = None
 
-		if self.document_reference in ("Sales Invoice", "Delivery Note"):
+		if self.is_outbound_reference():
 			reference_doc, reference_items = self.ensure_outbound_items()
 
 		# Validate that at least one item exists
@@ -230,7 +241,7 @@ class GatePass(Document):
 			frappe.throw(_("Please add at least one item to the Gate Pass"))
 
 		# Validate quantities based on document type
-		if self.document_reference in ("Sales Invoice", "Delivery Note"):
+		if self.is_outbound_reference():
 			for item in self.gate_pass_table:
 				if flt(item.dispatched_qty) <= 0:
 					frappe.throw(
@@ -249,9 +260,9 @@ class GatePass(Document):
 			self.populate_reference_defaults(reference_doc)
 			self.ensure_company_matches_reference(reference_doc)
 
-			if self.document_reference in ("Purchase Order", "Subcontracting Order"):
+			if self.is_inbound_reference():
 				self.validate_supplier(reference_doc)
-			elif self.document_reference in ("Sales Invoice", "Delivery Note"):
+			elif self.is_outbound_reference():
 				expected_items = reference_items
 				if not expected_items:
 					if self.document_reference == "Sales Invoice":
@@ -309,14 +320,7 @@ class GatePass(Document):
 		if not reference_doc:
 			return 0
 
-		for fieldname in (
-			"rounded_total",
-			"grand_total",
-			"base_grand_total",
-			"net_total",
-			"total",
-			"base_total",
-		):
+		for fieldname in REFERENCE_TOTAL_FIELDS:
 			if hasattr(reference_doc, fieldname):
 				value = reference_doc.get(fieldname)
 				if value:
@@ -524,20 +528,19 @@ def get_items(document_reference, reference_number):
 	if not frappe.has_permission(document_reference, "read"):
 		frappe.throw(_("You don't have permission to access {0}").format(document_reference))
 
-	items = []
+	fetchers = {
+		"Purchase Order": get_purchase_order_items,
+		"Subcontracting Order": get_subcontracting_order_items,
+		"Sales Invoice": get_sales_invoice_items,
+		"Delivery Note": get_delivery_note_items,
+	}
 
-	if document_reference == "Purchase Order":
-		items = get_purchase_order_items(reference_number)
-	elif document_reference == "Subcontracting Order":
-		items = get_subcontracting_order_items(reference_number)
-	elif document_reference == "Sales Invoice":
-		items = get_sales_invoice_items(reference_number)
-	elif document_reference == "Delivery Note":
-		items = get_delivery_note_items(reference_number)
-	else:
+	try:
+		fetcher = fetchers[document_reference]
+	except KeyError:
 		frappe.throw(_("Unsupported Document Reference: {0}").format(document_reference))
 
-	return items
+	return fetcher(reference_number)
 
 
 def get_purchase_order_items(purchase_order):
@@ -744,7 +747,7 @@ def extract_compliance_details(doc, document_reference):
 		"e_waybill_status": None,
 		"e_waybill_number": None,
 	}
-	if document_reference not in ("Sales Invoice", "Delivery Note") or not doc:
+	if document_reference not in OUTBOUND_REFERENCES or not doc:
 		return details
 
 	irn = getattr(doc, "irn", None)
@@ -797,7 +800,7 @@ def resolve_reference_address(doc, document_reference):
 	if not doc:
 		return ""
 
-	if document_reference in ("Purchase Order", "Subcontracting Order"):
+	if document_reference in INBOUND_REFERENCES:
 		return doc.get("address_display") or ""
 
 	if document_reference == "Sales Invoice":
@@ -938,7 +941,7 @@ def get_reference_details(document_reference, reference_number):
 		}
 	)
 
-	if document_reference in ("Purchase Order", "Subcontracting Order"):
+	if document_reference in INBOUND_REFERENCES:
 		details.update(
 			{
 				"party_type": "Supplier",
@@ -948,7 +951,7 @@ def get_reference_details(document_reference, reference_number):
 				"supplier_delivery_note": getattr(doc, "supplier_delivery_note", None),
 			}
 		)
-	elif document_reference in ("Sales Invoice", "Delivery Note"):
+	elif document_reference in OUTBOUND_REFERENCES:
 		details.update(
 			{
 				"party_type": "Customer",
@@ -969,7 +972,7 @@ def get_outbound_compliance_status(document_reference, reference_number, gate_pa
 	This is a lightweight helper that allows the frontend to display status banners.
 	The detailed validation logic is implemented during document validation/submission.
 	"""
-	if document_reference not in ("Sales Invoice", "Delivery Note"):
+	if document_reference not in OUTBOUND_REFERENCES:
 		return None
 
 	# Placeholder response; detailed compliance enforcement is handled during validation.

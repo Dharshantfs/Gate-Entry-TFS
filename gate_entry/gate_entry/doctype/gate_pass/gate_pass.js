@@ -1,6 +1,10 @@
 // Copyright (c) 2025, Gurudatt Kulkarni and contributors
 // For license information, please see license.txt
 
+const INBOUND_REFERENCES = ["Purchase Order", "Subcontracting Order"];
+const OUTBOUND_REFERENCES = ["Sales Invoice", "Delivery Note"];
+const DOCUMENT_REFERENCES = [...INBOUND_REFERENCES, ...OUTBOUND_REFERENCES];
+
 frappe.ui.form.on("Gate Pass", {
 	onload_post_render(frm) {
 		// Initialize the custom UI component after form is fully rendered
@@ -50,15 +54,7 @@ frappe.ui.form.on("Gate Pass", {
 		frm.set_query("document_reference", function () {
 			return {
 				filters: {
-					name: [
-						"in",
-						[
-							"Purchase Order",
-							"Subcontracting Order",
-							"Sales Invoice",
-							"Delivery Note",
-						],
-					],
+					name: ["in", DOCUMENT_REFERENCES],
 				},
 			};
 		});
@@ -80,15 +76,7 @@ frappe.ui.form.on("Gate Pass", {
 		frm.set_query("document_reference", function () {
 			return {
 				filters: {
-					name: [
-						"in",
-						[
-							"Purchase Order",
-							"Subcontracting Order",
-							"Sales Invoice",
-							"Delivery Note",
-						],
-					],
+					name: ["in", DOCUMENT_REFERENCES],
 				},
 			};
 		});
@@ -352,7 +340,7 @@ function set_gate_pass_items(frm, items) {
 }
 
 function is_outbound_reference(documentReference) {
-	return ["Sales Invoice", "Delivery Note"].includes(documentReference);
+	return OUTBOUND_REFERENCES.includes(documentReference);
 }
 
 function refresh_compliance_status(frm) {

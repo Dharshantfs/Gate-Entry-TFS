@@ -12,6 +12,8 @@
  * - Syncs with hidden child table (gate_pass_table)
  */
 
+const GP_OUTBOUND_REFERENCES = ["Sales Invoice", "Delivery Note"];
+
 class GatePassCustomUI {
 	constructor(frm) {
 		this.frm = frm;
@@ -779,7 +781,7 @@ class GatePassCustomUI {
 
 	isOutbound() {
 		const reference = this.frm?.doc?.document_reference;
-		return reference ? ["Sales Invoice", "Delivery Note"].includes(reference) : false;
+		return reference ? GP_OUTBOUND_REFERENCES.includes(reference) : false;
 	}
 
 	render_outbound_items() {

@@ -6,6 +6,8 @@ import frappe
 from frappe import _
 from frappe.permissions import add_permission, update_permission_property
 
+from gate_entry.constants import OUTBOUND_REFERENCES
+
 SECURITY_GUARD_ROLE = "Security Guard"
 
 
@@ -41,7 +43,7 @@ def ensure_security_guard_permissions() -> None:
 
 	ensure_security_guard_role()
 
-	for doctype in ("Sales Invoice", "Delivery Note"):
+	for doctype in sorted(OUTBOUND_REFERENCES):
 		add_read_only_permission(doctype, SECURITY_GUARD_ROLE)
 
 	# Guards need the e-way bill threshold from GST Settings to evaluate compliance.
