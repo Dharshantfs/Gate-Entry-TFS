@@ -203,14 +203,17 @@ class GatePassCustomUI {
 
 		if (this.isOutbound()) {
 			const referenceLabel =
-				this.frm.doc.document_reference === "Sales Invoice" ? __("Sales Invoice") : __("Delivery Note");
+				this.frm.doc.document_reference === "Sales Invoice"
+					? __("Sales Invoice")
+					: __("Delivery Note");
 
 			return `
 				<div class="alert alert-info outbound-note">
 					<i class="fa fa-info-circle"></i>
-					${__("Items and dispatched quantities are loaded automatically from the {0}. Editing is disabled.", [
-						referenceLabel,
-					])}
+					${__(
+						"Items and dispatched quantities are loaded automatically from the {0}. Editing is disabled.",
+						[referenceLabel]
+					)}
 				</div>
 			`;
 		}
@@ -247,14 +250,14 @@ class GatePassCustomUI {
 
 		if (this.isOutbound()) {
 			return this.render_outbound_items();
-		} else{
+		} else {
 			let items_html = this.items
-			.map((item, index) => {
-				return this.render_item_row(item, index);
-			})
-			.join("");
+				.map((item, index) => {
+					return this.render_item_row(item, index);
+				})
+				.join("");
 
-		return `
+			return `
 			<div class="items-list">
 				<div class="items-list-header">
 					<div class="item-col item-code-col">Item Code</div>
@@ -673,7 +676,7 @@ class GatePassCustomUI {
 		];
 
 		// Add order type information
-		if(is_outbound) {
+		if (is_outbound) {
 			fields.push({
 				fieldtype: "Float",
 				fieldname: "dispatched_qty",
@@ -681,7 +684,7 @@ class GatePassCustomUI {
 				read_only: 1,
 				default: item.dispatched_qty || 0,
 			});
-		} else{
+		} else {
 			if (is_rate_contract) {
 				fields.push({
 					fieldtype: "Data",
@@ -805,11 +808,7 @@ class GatePassCustomUI {
 					</div>
 					<div class="item-col received-qty-col outbound-qty-col">
 						<span class="outbound-qty-value">${this.formatQuantity(item.dispatched_qty)}</span>
-						${
-							item.uom
-								? `<span class="outbound-qty-uom">${frappe.utils.escape_html(item.uom)}</span>`
-								: ""
-						}
+						${item.uom ? `<span class="outbound-qty-uom">${frappe.utils.escape_html(item.uom)}</span>` : ""}
 					</div>
 					<div class="item-col actions-col outbound-actions">
 						<button class="btn btn-xs btn-info info-btn" data-index="${idx}" title="View Details">

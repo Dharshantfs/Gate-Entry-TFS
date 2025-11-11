@@ -22,7 +22,13 @@ frappe.query_reports["Pending Gate Passes"] = {
 			fieldname: "document_reference",
 			label: __("Reference Type"),
 			fieldtype: "Select",
-			options: ["", "Purchase Order", "Subcontracting Order", "Sales Invoice", "Delivery Note"],
+			options: [
+				"",
+				"Purchase Order",
+				"Subcontracting Order",
+				"Sales Invoice",
+				"Delivery Note",
+			],
 		},
 		{
 			fieldname: "supplier",

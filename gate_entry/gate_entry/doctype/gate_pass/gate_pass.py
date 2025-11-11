@@ -4,7 +4,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt, nowdate, nowtime, cstr, cint
+from frappe.utils import cint, cstr, flt, nowdate, nowtime
 
 
 class GatePass(Document):
@@ -62,7 +62,11 @@ class GatePass(Document):
 			return None
 
 		cached_doc = getattr(self, "_reference_doc_cache", None)
-		if cached_doc and cached_doc.doctype == self.document_reference and cached_doc.name == self.reference_number:
+		if (
+			cached_doc
+			and cached_doc.doctype == self.document_reference
+			and cached_doc.name == self.reference_number
+		):
 			return cached_doc
 
 		self._reference_doc_cache = frappe.get_doc(self.document_reference, self.reference_number)
@@ -230,17 +234,13 @@ class GatePass(Document):
 			for item in self.gate_pass_table:
 				if flt(item.dispatched_qty) <= 0:
 					frappe.throw(
-						_("Dispatched quantity for item {0} must be greater than zero").format(
-							item.item_code
-						)
+						_("Dispatched quantity for item {0} must be greater than zero").format(item.item_code)
 					)
 		else:
 			for item in self.gate_pass_table:
 				if flt(item.received_qty) <= 0:
 					frappe.throw(
-						_("Received quantity for item {0} must be greater than zero").format(
-							item.item_code
-						)
+						_("Received quantity for item {0} must be greater than zero").format(item.item_code)
 					)
 
 		# Validate reference document
@@ -286,16 +286,11 @@ class GatePass(Document):
 
 		missing_requirements = []
 
-		if self.document_reference == "Sales Invoice" and not is_generated_status(
-			self.e_invoice_status
-		):
+		if self.document_reference == "Sales Invoice" and not is_generated_status(self.e_invoice_status):
 			missing_requirements.append(_("E-Invoice"))
 
 		require_ewaybill = True
-		if (
-			self.document_reference == "Delivery Note"
-			and not cint(settings.get("enable_e_waybill_from_dn"))
-		):
+		if self.document_reference == "Delivery Note" and not cint(settings.get("enable_e_waybill_from_dn")):
 			require_ewaybill = False
 		if require_ewaybill and not is_generated_status(self.e_waybill_status):
 			missing_requirements.append(_("E-Way Bill"))
@@ -728,9 +723,7 @@ def extract_transport_details(doc):
 	Extract vehicle and driver details from reference documents
 	"""
 	return {
-		"vehicle_number": doc.get("vehicle_number")
-		or doc.get("vehicle_no")
-		or doc.get("vehicle"),
+		"vehicle_number": doc.get("vehicle_number") or doc.get("vehicle_no") or doc.get("vehicle"),
 		"driver_name": doc.get("driver_name") or doc.get("driver"),
 		"driver_contact": doc.get("driver_contact")
 		or doc.get("driver_mobile_no")
@@ -902,9 +895,7 @@ def get_address(document_reference, reference_number):
 		)
 		if address_fields:
 			address = (
-				address_fields.get("shipping_address_display")
-				or address_fields.get("address_display")
-				or ""
+				address_fields.get("shipping_address_display") or address_fields.get("address_display") or ""
 			)
 
 	return address

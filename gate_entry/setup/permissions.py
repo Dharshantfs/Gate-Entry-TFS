@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import frappe
 from frappe import _
-
 from frappe.permissions import add_permission, update_permission_property
 
 SECURITY_GUARD_ROLE = "Security Guard"
@@ -83,5 +82,3 @@ def add_read_only_permission(doctype: str, role: str, permlevel: int = 0) -> Non
 				print(f"Column {prop} does not exist in Custom DocPerm")
 				continue
 			raise
-
-

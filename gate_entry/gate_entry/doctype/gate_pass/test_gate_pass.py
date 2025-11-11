@@ -16,9 +16,7 @@ from gate_entry.gate_entry.doctype.gate_pass.gate_pass import (
 
 class TestGatePass(FrappeTestCase):
 	def test_sales_invoice_items_exclude_financial_fields(self):
-		with patch(
-			"gate_entry.gate_entry.doctype.gate_pass.gate_pass.frappe.get_doc"
-		) as get_doc:
+		with patch("gate_entry.gate_entry.doctype.gate_pass.gate_pass.frappe.get_doc") as get_doc:
 			item = SimpleNamespace(
 				item_code="ITEM-001",
 				item_name="Widget",
@@ -51,9 +49,7 @@ class TestGatePass(FrappeTestCase):
 		self.assertEqual(data["warehouse"], "Stores - CO")
 
 	def test_delivery_note_items_exclude_financial_fields(self):
-		with patch(
-			"gate_entry.gate_entry.doctype.gate_pass.gate_pass.frappe.get_doc"
-		) as get_doc:
+		with patch("gate_entry.gate_entry.doctype.gate_pass.gate_pass.frappe.get_doc") as get_doc:
 			item = SimpleNamespace(
 				item_code="ITEM-002",
 				item_name="Gadget",

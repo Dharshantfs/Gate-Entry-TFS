@@ -22,7 +22,13 @@ frappe.query_reports["Gate Register"] = {
 			fieldname: "document_reference",
 			label: __("Source Type"),
 			fieldtype: "Select",
-			options: ["", "Purchase Order", "Subcontracting Order", "Sales Invoice", "Delivery Note"],
+			options: [
+				"",
+				"Purchase Order",
+				"Subcontracting Order",
+				"Sales Invoice",
+				"Delivery Note",
+			],
 		},
 		{
 			fieldname: "supplier",

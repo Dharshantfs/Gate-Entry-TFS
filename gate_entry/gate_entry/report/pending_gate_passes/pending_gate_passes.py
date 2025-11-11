@@ -136,10 +136,7 @@ def get_data(filters: frappe._dict) -> list[dict[str, object]]:
 		party_key = (row.document_reference, row.reference_number)
 		party_details = parties.get(party_key, {})
 		party_name = (
-			party_details.get("party_name")
-			or party_details.get("party")
-			or row.get("supplier")
-			or ""
+			party_details.get("party_name") or party_details.get("party") or row.get("supplier") or ""
 		)
 
 		if filters.get("customer"):

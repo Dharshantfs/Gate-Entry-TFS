@@ -52,7 +52,12 @@ frappe.ui.form.on("Gate Pass", {
 				filters: {
 					name: [
 						"in",
-						["Purchase Order", "Subcontracting Order", "Sales Invoice", "Delivery Note"],
+						[
+							"Purchase Order",
+							"Subcontracting Order",
+							"Sales Invoice",
+							"Delivery Note",
+						],
 					],
 				},
 			};
@@ -71,13 +76,18 @@ frappe.ui.form.on("Gate Pass", {
 
 		refresh_compliance_status(frm);
 	},
-	onload(frm){
+	onload(frm) {
 		frm.set_query("document_reference", function () {
 			return {
 				filters: {
 					name: [
 						"in",
-						["Purchase Order", "Subcontracting Order", "Sales Invoice", "Delivery Note"],
+						[
+							"Purchase Order",
+							"Subcontracting Order",
+							"Sales Invoice",
+							"Delivery Note",
+						],
 					],
 				},
 			};
@@ -272,7 +282,6 @@ function load_reference_details(frm) {
 			if (is_outbound_reference(frm.doc.document_reference)) {
 				updates.supplier = null;
 				updates.supplier_delivery_note = null;
-
 			} else if (details.party_type === "Supplier" && details.party) {
 				updates.supplier = details.party;
 				if (details.supplier_delivery_note) {
@@ -352,7 +361,11 @@ function refresh_compliance_status(frm) {
 		return;
 	}
 
-	if (!frm.doc.document_reference || !frm.doc.reference_number || !is_outbound_reference(frm.doc.document_reference)) {
+	if (
+		!frm.doc.document_reference ||
+		!frm.doc.reference_number ||
+		!is_outbound_reference(frm.doc.document_reference)
+	) {
 		clear_compliance_status(frm);
 		return;
 	}
@@ -420,7 +433,11 @@ function set_compliance_status(field, status) {
 	}
 
 	if (!body.length) {
-		body.push(`<div class="compliance-banner-description">${__("No compliance information available.")}</div>`);
+		body.push(
+			`<div class="compliance-banner-description">${__(
+				"No compliance information available."
+			)}</div>`
+		);
 	}
 
 	const html = `

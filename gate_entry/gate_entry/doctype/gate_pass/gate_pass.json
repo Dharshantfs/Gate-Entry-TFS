@@ -187,7 +187,6 @@
   "label": "Compliance Details"
  },
  {
-  "depends_on": "eval:doc.document_reference in ['Sales Invoice', 'Delivery Note']",
   "fieldname": "e_invoice_status",
   "fieldtype": "Data",
   "label": "E-Invoice Status",
