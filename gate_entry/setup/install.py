@@ -4,6 +4,8 @@
 import frappe
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
+from gate_entry.setup.permissions import ensure_security_guard_permissions
+
 REPORTS = (
 	"pending_gate_passes",
 	"gate_register",
@@ -33,12 +35,14 @@ def after_install():
 		)
 
 	ensure_reports()
+	ensure_security_guard_permissions()
 
 
 def after_migrate():
 	"""Ensure reports and custom fields exist after migrations."""
 
 	ensure_reports()
+	ensure_security_guard_permissions()
 
 
 def create_gate_pass_custom_fields():

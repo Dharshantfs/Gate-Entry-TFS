@@ -12,6 +12,13 @@ bench get-app $URL_OF_THIS_REPO --branch develop
 bench install-app gate_entry
 ```
 
+### Configuration
+
+- Assign the auto-created `Security Guard` role to guard users. The setup hooks harden this role with read-only access to `Sales Invoice`, `Delivery Note`, and `GST Settings`, while keeping Desk access disabled.
+- Ensure outbound sales documents capture transport details: add or expose `vehicle_number`, `driver_name`, and `driver_contact` fields on `Sales Invoice` and `Delivery Note` so the gate pass can auto-populate them.
+- Review `GST Settings` and configure `e_waybill_threshold` (and `enable_e_waybill_from_dn` if Delivery Notes should be blocked) to align compliance checks with your statutory requirements.
+- Keep guard users on the streamlined Gate Pass form; they should not require additional financial roles or report permissions.
+
 ### Contributing
 
 This app uses `pre-commit` for code formatting and linting. Please [install pre-commit](https://pre-commit.com/#installation) and enable it for this repository:

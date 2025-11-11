@@ -14,6 +14,7 @@
   "conversion_factor",
   "ordered_qty",
   "received_qty",
+  "dispatched_qty",
   "pending_qty",
   "is_rate_contract",
   "section_break_pricing",
@@ -80,6 +81,14 @@
    "precision": "3",
    "reqd": 1
   },
+ {
+  "default": "0",
+  "fieldname": "dispatched_qty",
+  "fieldtype": "Float",
+  "label": "Dispatched Qty",
+  "precision": "3",
+  "read_only": 1
+ },
   {
    "fieldname": "pending_qty",
    "fieldtype": "Float",

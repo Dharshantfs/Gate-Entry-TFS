@@ -19,6 +19,18 @@ frappe.query_reports["Gate Register"] = {
 			options: ["", "Gate In", "Gate Out"],
 		},
 		{
+			fieldname: "document_reference",
+			label: __("Source Type"),
+			fieldtype: "Select",
+			options: [
+				"",
+				"Purchase Order",
+				"Subcontracting Order",
+				"Sales Invoice",
+				"Delivery Note",
+			],
+		},
+		{
 			fieldname: "supplier",
 			label: __("Supplier"),
 			fieldtype: "Link",

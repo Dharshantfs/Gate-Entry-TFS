@@ -27,6 +27,13 @@
   "gate_entry_time",
   "material_details_section",
   "custom_ui",
+  "compliance_status_html",
+  "compliance_details_section",
+  "e_invoice_status",
+  "e_invoice_reference",
+  "compliance_column_break",
+  "e_waybill_status",
+  "e_waybill_number",
   "gate_pass_table",
   "receipt_references_section",
   "purchase_receipt",
@@ -96,8 +103,7 @@
    "reqd": 1
   },
   {
-   "depends_on": "reference_number",
-   "fetch_from": "reference_number.supplier",
+   "depends_on": "eval:doc.document_reference in ['Purchase Order', 'Subcontracting Order']",
    "fieldname": "supplier",
    "fieldtype": "Link",
    "label": "Supplier",
@@ -105,6 +111,7 @@
    "read_only": 1
   },
   {
+   "depends_on": "eval:doc.document_reference in ['Purchase Order', 'Subcontracting Order']",
    "fieldname": "supplier_delivery_note",
    "fieldtype": "Data",
    "label": "Supplier Delivery Note"
@@ -167,11 +174,57 @@
    "fieldtype": "HTML",
    "label": "Items List"
   },
+ {
+  "fieldname": "compliance_status_html",
+  "fieldtype": "HTML",
+  "label": "Compliance Status",
+  "read_only": 1
+ },
+ {
+  "depends_on": "eval:doc.document_reference in ['Sales Invoice', 'Delivery Note']",
+  "fieldname": "compliance_details_section",
+  "fieldtype": "Section Break",
+  "label": "Compliance Details"
+ },
+ {
+  "fieldname": "e_invoice_status",
+  "fieldtype": "Data",
+  "label": "E-Invoice Status",
+  "read_only": 1,
+  "depends_on": "eval:doc.document_reference=='Sales Invoice'"
+ },
+ {
+  "depends_on": "eval:doc.document_reference=='Sales Invoice'",
+  "fieldname": "e_invoice_reference",
+  "fieldtype": "Data",
+  "label": "IRN Number",
+  "read_only": 1
+ },
+ {
+  "depends_on": "eval:doc.document_reference in ['Sales Invoice', 'Delivery Note']",
+  "fieldname": "compliance_column_break",
+  "fieldtype": "Column Break"
+ },
+ {
+  "depends_on": "eval:doc.document_reference in ['Sales Invoice', 'Delivery Note']",
+  "fieldname": "e_waybill_status",
+  "fieldtype": "Data",
+  "label": "E-Way Bill Status",
+  "read_only": 1
+ },
+ {
+  "depends_on": "eval:doc.document_reference in ['Sales Invoice', 'Delivery Note']",
+  "fieldname": "e_waybill_number",
+  "fieldtype": "Data",
+  "label": "E-Way Bill Number",
+  "read_only": 1
+ },
   {
    "fieldname": "gate_pass_table",
    "fieldtype": "Table",
    "label": "Gate Entry Items",
-   "options": "Gate Pass Table"
+  "options": "Gate Pass Table",
+  "hidden": 1
   },
   {
    "fieldname": "receipt_references_section",

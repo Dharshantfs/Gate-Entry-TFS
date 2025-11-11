@@ -50,7 +50,15 @@ frappe.ui.form.on("Gate Pass", {
 		frm.set_query("document_reference", function () {
 			return {
 				filters: {
-					name: ["in", ["Purchase Order", "Subcontracting Order"]],
+					name: [
+						"in",
+						[
+							"Purchase Order",
+							"Subcontracting Order",
+							"Sales Invoice",
+							"Delivery Note",
+						],
+					],
 				},
 			};
 		});
@@ -65,6 +73,25 @@ frappe.ui.form.on("Gate Pass", {
 				};
 			});
 		}
+
+		refresh_compliance_status(frm);
+	},
+	onload(frm) {
+		frm.set_query("document_reference", function () {
+			return {
+				filters: {
+					name: [
+						"in",
+						[
+							"Purchase Order",
+							"Subcontracting Order",
+							"Sales Invoice",
+							"Delivery Note",
+						],
+					],
+				},
+			};
+		});
 	},
 
 	after_save(frm) {
@@ -82,6 +109,22 @@ frappe.ui.form.on("Gate Pass", {
 		if (frm.doc.reference_number) {
 			frm.set_value("reference_number", "");
 		}
+
+		// Update entry type locally for better UX
+		if (is_outbound_reference(frm.doc.document_reference)) {
+			frm.set_value("entry_type", "Gate Out");
+			frm.set_value("supplier", null);
+			frm.set_value("supplier_delivery_note", null);
+		} else {
+			frm.set_value("entry_type", "Gate In");
+		}
+
+		// Clear items when document type changes
+		frm.clear_table("gate_pass_table");
+		frm.refresh_field("gate_pass_table");
+
+		clear_compliance_status(frm);
+
 		// Refresh custom UI
 		if (frm.gate_pass_ui) {
 			frm.gate_pass_ui.refresh();
@@ -91,18 +134,16 @@ frappe.ui.form.on("Gate Pass", {
 	reference_number(frm) {
 		// Fetch address display from reference document
 		if (frm.doc.document_reference && frm.doc.reference_number) {
-			frappe.call({
-				method: "gate_entry.gate_entry.doctype.gate_pass.gate_pass.get_address",
-				args: {
-					document_reference: frm.doc.document_reference,
-					reference_number: frm.doc.reference_number,
-				},
-				callback: function (response) {
-					if (response.message) {
-						frm.set_value("address_display", response.message);
-					}
-				},
-			});
+			load_reference_details(frm);
+
+			if (is_outbound_reference(frm.doc.document_reference)) {
+				load_reference_items(frm);
+				refresh_compliance_status(frm);
+			} else {
+				clear_compliance_status(frm);
+			}
+		} else {
+			clear_compliance_status(frm);
 		}
 
 		// Refresh custom UI to show/hide Add Item button
@@ -198,4 +239,217 @@ function create_subcontracting_receipt(frm) {
 			},
 		});
 	});
+}
+
+function load_reference_details(frm) {
+	frappe.call({
+		method: "gate_entry.gate_entry.doctype.gate_pass.gate_pass.get_reference_details",
+		args: {
+			document_reference: frm.doc.document_reference,
+			reference_number: frm.doc.reference_number,
+		},
+		callback(response) {
+			const details = response.message;
+			console.log("Details: ", details);
+			if (!details) {
+				return;
+			}
+
+			const updates = {};
+
+			if (details.company && !frm.doc.company) {
+				updates.company = details.company;
+			}
+
+			if (details.address_display) {
+				updates.address_display = details.address_display;
+			}
+
+			updates.e_invoice_status = details.e_invoice_status || null;
+			updates.e_invoice_reference = details.e_invoice_reference || null;
+			updates.e_waybill_status = details.e_waybill_status || null;
+			updates.e_waybill_number = details.e_waybill_number || null;
+
+			if (details.vehicle_number && !frm.doc.vehicle_number) {
+				updates.vehicle_number = details.vehicle_number;
+			}
+			if (details.driver_name && !frm.doc.driver_name) {
+				updates.driver_name = details.driver_name;
+			}
+			if (details.driver_contact && !frm.doc.driver_contact) {
+				updates.driver_contact = details.driver_contact;
+			}
+			if (is_outbound_reference(frm.doc.document_reference)) {
+				updates.supplier = null;
+				updates.supplier_delivery_note = null;
+			} else if (details.party_type === "Supplier" && details.party) {
+				updates.supplier = details.party;
+				if (details.supplier_delivery_note) {
+					updates.supplier_delivery_note = details.supplier_delivery_note;
+				}
+			}
+			console.log("Updates: ", updates);
+			frm.set_value(updates).then(() => {
+				frm.refresh();
+			});
+		},
+	});
+}
+
+function load_reference_items(frm) {
+	frappe.call({
+		method: "gate_entry.gate_entry.doctype.gate_pass.gate_pass.get_items",
+		args: {
+			document_reference: frm.doc.document_reference,
+			reference_number: frm.doc.reference_number,
+		},
+		freeze: true,
+		freeze_message: __("Loading items from reference document..."),
+		callback(response) {
+			const items = response.message || [];
+			set_gate_pass_items(frm, items);
+		},
+	});
+}
+
+function set_gate_pass_items(frm, items) {
+	frm.clear_table("gate_pass_table");
+
+	(items || []).forEach((item) => {
+		const row = frm.add_child("gate_pass_table");
+		row.item_code = item.item_code;
+		row.item_name = item.item_name || "";
+		row.description = item.description || "";
+		row.uom = item.uom || "";
+		row.stock_uom = item.stock_uom || "";
+		row.conversion_factor = item.conversion_factor || 1.0;
+		row.ordered_qty = item.ordered_qty || 0;
+		row.received_qty = item.received_qty || 0;
+		row.dispatched_qty = item.dispatched_qty || 0;
+		row.pending_qty = item.pending_qty || 0;
+		row.is_rate_contract = item.is_rate_contract || 0;
+		row.rate = item.rate || 0;
+		const qty_for_amount = is_outbound_reference(frm.doc.document_reference)
+			? item.dispatched_qty || 0
+			: item.received_qty || 0;
+		row.amount = qty_for_amount * (item.rate || 0);
+		row.warehouse = item.warehouse || "";
+		row.rejected_warehouse = item.rejected_warehouse || "";
+		row.expense_account = item.expense_account || "";
+		row.cost_center = item.cost_center || "";
+		row.project = item.project || "";
+		row.schedule_date = item.schedule_date || "";
+		row.bom = item.bom || "";
+		row.include_exploded_items = item.include_exploded_items || 0;
+		row.order_item_name = item.order_item_name || "";
+	});
+
+	frm.refresh_field("gate_pass_table");
+
+	if (frm.gate_pass_ui) {
+		frm.gate_pass_ui.refresh();
+	}
+}
+
+function is_outbound_reference(documentReference) {
+	return ["Sales Invoice", "Delivery Note"].includes(documentReference);
+}
+
+function refresh_compliance_status(frm) {
+	const field = frm.fields_dict?.compliance_status_html;
+	if (!field) {
+		return;
+	}
+
+	if (
+		!frm.doc.document_reference ||
+		!frm.doc.reference_number ||
+		!is_outbound_reference(frm.doc.document_reference)
+	) {
+		clear_compliance_status(frm);
+		return;
+	}
+
+	frappe.call({
+		method: "gate_entry.gate_entry.doctype.gate_pass.gate_pass.get_outbound_compliance_status",
+		args: {
+			document_reference: frm.doc.document_reference,
+			reference_number: frm.doc.reference_number,
+			gate_pass: frm.doc.name || null,
+		},
+		callback(response) {
+			const status = response.message;
+			set_compliance_status(field, status);
+		},
+	});
+}
+
+function clear_compliance_status(frm) {
+	const field = frm.fields_dict?.compliance_status_html;
+	if (!field) {
+		return;
+	}
+	set_compliance_status(field, null);
+}
+
+function set_compliance_status(field, status) {
+	const wrapper = field.$wrapper;
+	if (!wrapper || wrapper.length === 0) {
+		return;
+	}
+	if (!status) {
+		wrapper.empty();
+		return;
+	}
+
+	const level = status.level || "info";
+	const title = frappe.utils.escape_html(status.title || "");
+	const messages = Array.isArray(status.messages) ? status.messages : [];
+	const description = status.description ? frappe.utils.escape_html(status.description) : "";
+
+	let icon = "info-circle";
+	if (level === "success") {
+		icon = "check-circle";
+	} else if (level === "warning") {
+		icon = "exclamation-triangle";
+	} else if (level === "error") {
+		icon = "times-circle";
+	}
+
+	const body = [];
+	if (title) {
+		body.push(`<div class="compliance-banner-title">${title}</div>`);
+	}
+
+	if (description) {
+		body.push(`<div class="compliance-banner-description">${description}</div>`);
+	}
+
+	if (messages.length) {
+		const listItems = messages
+			.map((message) => `<li>${frappe.utils.escape_html(message)}</li>`)
+			.join("");
+		body.push(`<ul class="compliance-banner-list">${listItems}</ul>`);
+	}
+
+	if (!body.length) {
+		body.push(
+			`<div class="compliance-banner-description">${__(
+				"No compliance information available."
+			)}</div>`
+		);
+	}
+
+	const html = `
+		<div class="compliance-banner compliance-${level}">
+			<div class="compliance-banner-icon">
+				<i class="fa fa-${icon}"></i>
+			</div>
+			<div class="compliance-banner-body">
+				${body.join("")}
+			</div>
+		</div>
+	`;
+
+	wrapper.html(html);
 }
