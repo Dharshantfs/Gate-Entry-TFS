@@ -8,6 +8,15 @@ from collections.abc import Iterable
 import frappe
 from frappe import _
 
+INBOUND_REFERENCES = {"Purchase Order", "Subcontracting Order"}
+OUTBOUND_REFERENCES = {"Sales Invoice", "Delivery Note"}
+REFERENCE_PARTY_FIELDS = {
+	"Purchase Order": ("supplier", "supplier_name"),
+	"Subcontracting Order": ("supplier", "supplier_name"),
+	"Sales Invoice": ("customer", "customer_name"),
+	"Delivery Note": ("customer", "customer_name"),
+}
+
 
 def execute(filters: dict | None = None):
 	"""Run the Gate Register report."""
@@ -44,10 +53,35 @@ def get_columns() -> list[dict[str, object]]:
 			"width": 160,
 		},
 		{
-			"label": _("Entry Type"),
+			"label": _("Direction"),
 			"fieldname": "entry_type",
 			"fieldtype": "Data",
 			"width": 110,
+		},
+		{
+			"label": _("Source Type"),
+			"fieldname": "document_reference",
+			"fieldtype": "Data",
+			"width": 150,
+		},
+		{
+			"label": _("Source Document"),
+			"fieldname": "reference_number",
+			"fieldtype": "Dynamic Link",
+			"options": "document_reference",
+			"width": 180,
+		},
+		{
+			"label": _("Party Type"),
+			"fieldname": "party_type",
+			"fieldtype": "Data",
+			"width": 120,
+		},
+		{
+			"label": _("Party"),
+			"fieldname": "party_name",
+			"fieldtype": "Data",
+			"width": 220,
 		},
 		{
 			"label": _("Vehicle Number"),
@@ -60,13 +94,6 @@ def get_columns() -> list[dict[str, object]]:
 			"fieldname": "driver_name",
 			"fieldtype": "Data",
 			"width": 150,
-		},
-		{
-			"label": _("Supplier"),
-			"fieldname": "supplier",
-			"fieldtype": "Link",
-			"options": "Supplier",
-			"width": 200,
 		},
 		{
 			"label": _("Material Summary"),
@@ -95,6 +122,9 @@ def get_data(filters: frappe._dict) -> list[dict[str, object]]:
 	if filters.get("entry_type"):
 		gate_pass_filters["entry_type"] = filters.entry_type
 
+	if filters.get("document_reference"):
+		gate_pass_filters["document_reference"] = filters.document_reference
+
 	if filters.get("supplier"):
 		gate_pass_filters["supplier"] = filters.supplier
 
@@ -112,6 +142,8 @@ def get_data(filters: frappe._dict) -> list[dict[str, object]]:
 			"gate_entry_date",
 			"gate_entry_time",
 			"entry_type",
+			"document_reference",
+			"reference_number",
 			"vehicle_number",
 			"driver_name",
 			"supplier",
@@ -122,11 +154,19 @@ def get_data(filters: frappe._dict) -> list[dict[str, object]]:
 	if not gate_passes:
 		return []
 
+	reference_parties = get_reference_parties(gate_passes)
 	gate_pass_names = [gp.name for gp in gate_passes]
 	items = frappe.get_all(
 		"Gate Pass Table",
 		filters={"parent": ["in", gate_pass_names]},
-		fields=["parent", "item_code", "item_name", "received_qty", "uom"],
+		fields=[
+			"parent",
+			"item_code",
+			"item_name",
+			"received_qty",
+			"dispatched_qty",
+			"uom",
+		],
 		order_by="parent asc, idx asc",
 	)
 
@@ -136,7 +176,17 @@ def get_data(filters: frappe._dict) -> list[dict[str, object]]:
 
 	data: list[dict[str, object]] = []
 	for gate_pass in gate_passes:
-		material_summary = build_material_summary(items_by_parent.get(gate_pass.name, []))
+		key = (gate_pass.document_reference, gate_pass.reference_number)
+		party_details = reference_parties.get(key, {})
+
+		party_type = derive_party_type(gate_pass.document_reference)
+		party_name = party_details.get("party_name") or party_details.get("party") or gate_pass.supplier
+
+		is_outbound = gate_pass.entry_type == "Gate Out"
+		material_summary = build_material_summary(
+			items_by_parent.get(gate_pass.name, []),
+			is_outbound=is_outbound,
+		)
 
 		data.append(
 			{
@@ -144,9 +194,12 @@ def get_data(filters: frappe._dict) -> list[dict[str, object]]:
 				"gate_entry_time": gate_pass.gate_entry_time,
 				"gate_pass": gate_pass.name,
 				"entry_type": gate_pass.entry_type,
+				"document_reference": gate_pass.document_reference,
+				"reference_number": gate_pass.reference_number,
+				"party_type": party_type,
+				"party_name": party_name,
 				"vehicle_number": gate_pass.vehicle_number,
 				"driver_name": gate_pass.driver_name,
-				"supplier": gate_pass.supplier,
 				"material_summary": material_summary,
 			}
 		)
@@ -154,12 +207,69 @@ def get_data(filters: frappe._dict) -> list[dict[str, object]]:
 	return data
 
 
-def build_material_summary(items: Iterable[dict[str, object]]) -> str:
+def get_reference_parties(
+	gate_passes: Iterable[frappe._dict],
+) -> dict[tuple[str | None, str | None], dict[str, str | None]]:
+	"""Fetch party information for reference documents."""
+
+	reference_numbers: dict[str, set[str]] = defaultdict(set)
+	for gate_pass in gate_passes:
+		if not gate_pass.document_reference or not gate_pass.reference_number:
+			continue
+		if gate_pass.document_reference not in REFERENCE_PARTY_FIELDS:
+			continue
+		reference_numbers[gate_pass.document_reference].add(gate_pass.reference_number)
+
+	party_details: dict[tuple[str | None, str | None], dict[str, str | None]] = {}
+	for document_reference, names in reference_numbers.items():
+		if not names:
+			continue
+		party_field, party_name_field = REFERENCE_PARTY_FIELDS[document_reference]
+		records = frappe.get_all(
+			document_reference,
+			filters={"name": ["in", list(names)]},
+			fields=["name", party_field, party_name_field],
+		)
+		for record in records:
+			party_details[(document_reference, record.name)] = {
+				"party": record.get(party_field),
+				"party_name": record.get(party_name_field) or record.get(party_field),
+			}
+
+	return party_details
+
+
+def derive_party_type(document_reference: str | None) -> str | None:
+	"""Return the human-readable party type for the given reference."""
+
+	if not document_reference:
+		return None
+
+	if document_reference in INBOUND_REFERENCES:
+		return _("Supplier")
+
+	if document_reference in OUTBOUND_REFERENCES:
+		return _("Customer")
+
+	return None
+
+
+def build_material_summary(
+	items: Iterable[dict[str, object]] | None,
+	is_outbound: bool = False,
+) -> str:
 	"""Create the comma-separated material summary string."""
 
+	if not items:
+		return "-"
+
+	quantity_field = "dispatched_qty" if is_outbound else "received_qty"
 	summary: list[str] = []
 	for item in items:
-		qty = item.get("received_qty") or 0
+		qty = item.get(quantity_field) or 0
+		if not qty:
+			fallback_field = "received_qty" if quantity_field == "dispatched_qty" else "dispatched_qty"
+			qty = item.get(fallback_field) or 0
 		qty_formatted = frappe.format_value(qty, {"fieldtype": "Float", "precision": 3})
 		uom = item.get("uom") or ""
 		qty_with_uom = f"{qty_formatted} {uom}".strip()
@@ -175,7 +285,10 @@ def get_report_summary(data: Iterable[dict[str, object]]) -> list[dict[str, obje
 	if not data:
 		return []
 
-	return [
+	total_inbound = sum(1 for row in data if row.get("entry_type") == "Gate In")
+	total_outbound = sum(1 for row in data if row.get("entry_type") == "Gate Out")
+
+	summary = [
 		{
 			"label": _("Gate Passes"),
 			"value": len(data),
@@ -183,3 +296,25 @@ def get_report_summary(data: Iterable[dict[str, object]]) -> list[dict[str, obje
 			"datatype": "Int",
 		}
 	]
+
+	if total_inbound:
+		summary.append(
+			{
+				"label": _("Inbound"),
+				"value": total_inbound,
+				"indicator": "green",
+				"datatype": "Int",
+			}
+		)
+
+	if total_outbound:
+		summary.append(
+			{
+				"label": _("Outbound"),
+				"value": total_outbound,
+				"indicator": "orange",
+				"datatype": "Int",
+			}
+		)
+
+	return summary

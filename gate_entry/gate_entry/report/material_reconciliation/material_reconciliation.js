@@ -16,7 +16,7 @@ frappe.query_reports["Material Reconciliation"] = {
 			fieldname: "document_type",
 			label: __("Document Type"),
 			fieldtype: "Select",
-			options: ["All", "Purchase Order", "Subcontracting Order"],
+			options: ["All", "Purchase Order", "Subcontracting Order", "Sales Invoice", "Delivery Note"],
 			default: "All",
 		},
 		{
@@ -24,6 +24,12 @@ frappe.query_reports["Material Reconciliation"] = {
 			label: __("Supplier"),
 			fieldtype: "Link",
 			options: "Supplier",
+		},
+		{
+			fieldname: "customer",
+			label: __("Customer"),
+			fieldtype: "Link",
+			options: "Customer",
 		},
 		{
 			fieldname: "company",

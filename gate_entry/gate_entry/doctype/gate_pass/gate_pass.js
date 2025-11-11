@@ -240,6 +240,7 @@ function load_reference_details(frm) {
 		},
 		callback(response) {
 			const details = response.message;
+			console.log("Details: ", details);
 			if (!details) {
 				return;
 			}
@@ -254,32 +255,33 @@ function load_reference_details(frm) {
 				updates.address_display = details.address_display;
 			}
 
+			updates.e_invoice_status = details.e_invoice_status || null;
+			updates.e_invoice_reference = details.e_invoice_reference || null;
+			updates.e_waybill_status = details.e_waybill_status || null;
+			updates.e_waybill_number = details.e_waybill_number || null;
+
+			if (details.vehicle_number && !frm.doc.vehicle_number) {
+				updates.vehicle_number = details.vehicle_number;
+			}
+			if (details.driver_name && !frm.doc.driver_name) {
+				updates.driver_name = details.driver_name;
+			}
+			if (details.driver_contact && !frm.doc.driver_contact) {
+				updates.driver_contact = details.driver_contact;
+			}
 			if (is_outbound_reference(frm.doc.document_reference)) {
 				updates.supplier = null;
 				updates.supplier_delivery_note = null;
 
-				if (details.vehicle_number && !frm.doc.vehicle_number) {
-					updates.vehicle_number = details.vehicle_number;
-				}
-				if (details.driver_name && !frm.doc.driver_name) {
-					updates.driver_name = details.driver_name;
-				}
-				if (details.driver_contact && !frm.doc.driver_contact) {
-					updates.driver_contact = details.driver_contact;
-				}
-
-				// Ensure dispatch date/time aligns with current timestamp for outbound movements
-				updates.gate_entry_date = frappe.datetime.get_today();
-				updates.gate_entry_time = frappe.datetime.now_time();
 			} else if (details.party_type === "Supplier" && details.party) {
 				updates.supplier = details.party;
 				if (details.supplier_delivery_note) {
 					updates.supplier_delivery_note = details.supplier_delivery_note;
 				}
 			}
-
-			Object.keys(updates).forEach((fieldname) => {
-				frm.set_value(fieldname, updates[fieldname]);
+			console.log("Updates: ", updates);
+			frm.set_value(updates).then(() => {
+				frm.refresh();
 			});
 		},
 	});
@@ -382,7 +384,6 @@ function set_compliance_status(field, status) {
 	if (!wrapper || wrapper.length === 0) {
 		return;
 	}
-
 	if (!status) {
 		wrapper.empty();
 		return;

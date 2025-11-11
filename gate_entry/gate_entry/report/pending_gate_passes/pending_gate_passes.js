@@ -13,10 +13,28 @@ frappe.query_reports["Pending Gate Passes"] = {
 			default: frappe.datetime.get_today(),
 		},
 		{
+			fieldname: "entry_type",
+			label: __("Entry Type"),
+			fieldtype: "Select",
+			options: ["", "Gate In", "Gate Out"],
+		},
+		{
+			fieldname: "document_reference",
+			label: __("Reference Type"),
+			fieldtype: "Select",
+			options: ["", "Purchase Order", "Subcontracting Order", "Sales Invoice", "Delivery Note"],
+		},
+		{
 			fieldname: "supplier",
 			label: __("Supplier"),
 			fieldtype: "Link",
 			options: "Supplier",
+		},
+		{
+			fieldname: "customer",
+			label: __("Customer"),
+			fieldtype: "Link",
+			options: "Customer",
 		},
 		{
 			fieldname: "company",
@@ -35,6 +53,10 @@ frappe.query_reports["Pending Gate Passes"] = {
 				data.aging_color ||
 				(data.aging <= 0 ? "green" : data.aging <= 1 ? "orange" : "red");
 			value = `<span class="indicator-pill ${color}">${data.aging}</span>`;
+		} else if (column.fieldname === "compliance_status" && data) {
+			const statusText = frappe.utils.escape_html(value || "-");
+			const statusColor = data.compliance_pending ? "red" : "green";
+			value = `<span class="indicator-pill ${statusColor}">${statusText}</span>`;
 		}
 
 		return value;

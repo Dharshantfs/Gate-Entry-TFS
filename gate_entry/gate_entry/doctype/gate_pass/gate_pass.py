@@ -4,7 +4,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt, nowdate, nowtime
+from frappe.utils import flt, nowdate, nowtime, cstr, cint
 
 
 class GatePass(Document):
@@ -94,6 +94,7 @@ class GatePass(Document):
 				self.supplier = doc.supplier
 			if hasattr(doc, "supplier_delivery_note") and doc.supplier_delivery_note:
 				self.supplier_delivery_note = doc.supplier_delivery_note
+			self.clear_compliance_details()
 		else:
 			self.supplier = None
 			self.supplier_delivery_note = None
@@ -104,16 +105,18 @@ class GatePass(Document):
 			self.set_transport_default("vehicle_number", transport.get("vehicle_number"), doc)
 			self.set_transport_default("driver_name", transport.get("driver_name"), doc)
 			self.set_transport_default("driver_contact", transport.get("driver_contact"), doc)
+			self.apply_compliance_details(extract_compliance_details(doc, self.document_reference))
+		else:
+			self.clear_compliance_details()
 
 	def set_transport_default(self, fieldname, value, reference_doc):
 		"""
-		Set transport field if missing and record auto-fill metadata for audit logging
+		Set transport field if missing
 		"""
 		if not value or self.get(fieldname):
 			return
 
 		self.set(fieldname, value)
-		self.record_transport_autofill(fieldname, value, reference_doc)
 
 	def ensure_outbound_items(self):
 		"""
@@ -257,90 +260,74 @@ class GatePass(Document):
 						expected_items = get_delivery_note_items(self.reference_number)
 
 				self.validate_outbound_quantities(expected_items)
+				self.enforce_outbound_compliance(reference_doc)
 
-	def record_transport_autofill(self, fieldname, value, reference_doc=None):
-		"""
-		Store metadata about auto-filled transport fields for later audit logging
-		"""
-		if not hasattr(self, "_transport_autofill"):
-			self._transport_autofill = {}
+	def apply_compliance_details(self, details):
+		self.e_invoice_status = details.get("e_invoice_status")
+		self.e_invoice_reference = details.get("e_invoice_reference")
+		self.e_waybill_status = details.get("e_waybill_status")
+		self.e_waybill_number = details.get("e_waybill_number")
 
-		source = ""
-		if reference_doc:
-			source = f"{reference_doc.doctype} {reference_doc.name}"
-		elif self.document_reference and self.reference_number:
-			source = f"{self.document_reference} {self.reference_number}"
+	def clear_compliance_details(self):
+		self.e_invoice_status = None
+		self.e_invoice_reference = None
+		self.e_waybill_status = None
+		self.e_waybill_number = None
 
-		self._transport_autofill[fieldname] = {"value": value, "source": source}
-
-	def after_insert(self):
-		self.log_transport_autofill_comment()
-
-	def on_update(self):
-		self.log_transport_changes()
-
-	def log_transport_autofill_comment(self):
-		"""
-		Write a timeline comment when transport information is auto-filled
-		"""
-		autofill = getattr(self, "_transport_autofill", None)
-		if not autofill:
+	def enforce_outbound_compliance(self, reference_doc):
+		settings = get_gst_settings()
+		threshold = flt(settings.get("e_waybill_threshold") or 0)
+		if not threshold:
 			return
 
-		meta = self.meta
-		lines = []
-		for fieldname, details in autofill.items():
-			value = details.get("value")
-			if not value:
-				continue
-			label = meta.get_label(fieldname) if meta else fieldname.replace("_", " ").title()
-			source = details.get("source") or _("reference document")
-			lines.append(f"- {label}: {frappe.bold(value)} ({_('from')} {source})")
-
-		if lines:
-			message = _("Auto-filled transport details:\n{0}").format("\n".join(lines))
-			self.add_comment("Info", message)
-
-		# Clear to avoid duplicate comments on subsequent saves within same request
-		self._transport_autofill = {}
-
-	def log_transport_changes(self):
-		"""
-		Add timeline comments when transport details are modified after initial auto-fill
-		"""
-		doc_before = self.get_doc_before_save()
-		if not doc_before:
+		total_value = self.get_reference_total(reference_doc)
+		if flt(total_value) < threshold:
 			return
 
-		meta = self.meta
-		fields = ["vehicle_number", "driver_name", "driver_contact"]
-		changes = []
+		missing_requirements = []
 
-		for field in fields:
-			old_value = doc_before.get(field)
-			new_value = self.get(field)
-			if old_value == new_value:
-				continue
+		if self.document_reference == "Sales Invoice" and not is_generated_status(
+			self.e_invoice_status
+		):
+			missing_requirements.append(_("E-Invoice"))
 
-			label = meta.get_label(field) if meta else field.replace("_", " ").title()
-			if old_value and new_value:
-				changes.append(
-					_("{0} updated from {1} to {2}").format(
-						label, frappe.bold(old_value), frappe.bold(new_value)
-					)
-				)
-			elif not old_value and new_value:
-				changes.append(
-					_("{0} set to {1}").format(label, frappe.bold(new_value))
-				)
-			elif old_value and not new_value:
-				changes.append(
-					_("{0} cleared (previously {1})").format(label, frappe.bold(old_value))
-				)
+		require_ewaybill = True
+		if (
+			self.document_reference == "Delivery Note"
+			and not cint(settings.get("enable_e_waybill_from_dn"))
+		):
+			require_ewaybill = False
+		if require_ewaybill and not is_generated_status(self.e_waybill_status):
+			missing_requirements.append(_("E-Way Bill"))
 
-		if changes:
-			message = _("Transport details updated:\n{0}").format("\n".join(f"- {c}" for c in changes))
-			self.add_comment("Info", message)
+		if not missing_requirements:
+			return
+
+		frappe.throw(
+			_("Cannot submit Gate Pass because the following compliance documents are missing: {0}").format(
+				", ".join(missing_requirements)
+			),
+			title=_("Compliance Validation Failed"),
+		)
+
+	def get_reference_total(self, reference_doc):
+		if not reference_doc:
+			return 0
+
+		for fieldname in (
+			"rounded_total",
+			"grand_total",
+			"base_grand_total",
+			"net_total",
+			"total",
+			"base_total",
+		):
+			if hasattr(reference_doc, fieldname):
+				value = reference_doc.get(fieldname)
+				if value:
+					return value
+
+		return 0
 
 	def ensure_company_matches_reference(self, reference_doc):
 		"""
@@ -692,16 +679,10 @@ def get_sales_invoice_items(sales_invoice):
 				"dispatched_qty": quantity,
 				"pending_qty": 0,
 				"is_rate_contract": 0,
-				"rate": flt(si_item.rate),
-				"amount": flt(si_item.amount),
 				"warehouse": si_item.warehouse,
 				"rejected_warehouse": None,
-				"expense_account": "",
-				"cost_center": si_item.cost_center,
 				"project": si_item.project,
 				"schedule_date": getattr(si_item, "delivery_date", None),
-				"bom": getattr(si_item, "bom", None),
-				"include_exploded_items": getattr(si_item, "include_exploded_items", 0),
 				"order_item_name": si_item.name,
 			}
 		)
@@ -731,16 +712,10 @@ def get_delivery_note_items(delivery_note):
 				"dispatched_qty": quantity,
 				"pending_qty": 0,
 				"is_rate_contract": 0,
-				"rate": flt(dn_item.rate),
-				"amount": flt(dn_item.amount),
 				"warehouse": dn_item.target_warehouse or dn_item.warehouse,
 				"rejected_warehouse": None,
-				"expense_account": "",
-				"cost_center": dn_item.cost_center,
 				"project": dn_item.project,
 				"schedule_date": getattr(dn_item, "schedule_date", None),
-				"bom": getattr(dn_item, "bom", None),
-				"include_exploded_items": getattr(dn_item, "include_exploded_items", 0),
 				"order_item_name": dn_item.name,
 			}
 		)
@@ -764,6 +739,62 @@ def extract_transport_details(doc):
 		or doc.get("driver_phone")
 		or doc.get("contact_phone"),
 	}
+
+
+def extract_compliance_details(doc, document_reference):
+	"""
+	Extract e-invoice and e-waybill information from outbound reference documents
+	"""
+	details = {
+		"e_invoice_status": None,
+		"e_invoice_reference": None,
+		"e_waybill_status": None,
+		"e_waybill_number": None,
+	}
+	if document_reference not in ("Sales Invoice", "Delivery Note") or not doc:
+		return details
+
+	irn = getattr(doc, "irn", None)
+	irn_cancelled = getattr(doc, "irn_cancelled", None)
+	e_invoice_status = getattr(doc, "e_invoice_status", None)
+
+	if document_reference == "Sales Invoice":
+		if irn:
+			status = "Cancelled" if irn_cancelled else "Generated"
+		else:
+			status = e_invoice_status or "Not Generated"
+	else:
+		status = None
+
+	e_waybill_number = getattr(doc, "ewaybill", None) or getattr(doc, "e_waybill_number", None)
+	e_waybill_status = getattr(doc, "e_waybill_status", None)
+
+	if e_waybill_number and not e_waybill_status:
+		e_waybill_status = "Generated"
+	elif not e_waybill_number and not e_waybill_status:
+		e_waybill_status = "Not Generated"
+
+	details["e_invoice_status"] = status
+	details["e_invoice_reference"] = irn
+	details["e_waybill_status"] = e_waybill_status
+	details["e_waybill_number"] = e_waybill_number
+
+	return details
+
+
+def get_gst_settings():
+	try:
+		return frappe.get_cached_doc("GST Settings")
+	except frappe.DoesNotExistError:
+		return frappe._dict()
+
+
+def is_generated_status(status):
+	if not status:
+		return False
+
+	status_value = cstr(status).strip().lower()
+	return status_value in {"manually generated", "generated", "valid", "active"}
 
 
 def resolve_reference_address(doc, document_reference):
@@ -905,6 +936,16 @@ def get_reference_details(document_reference, reference_number):
 		if hasattr(doc, "transaction_date")
 		else getattr(doc, "posting_date", None),
 	}
+
+	compliance = extract_compliance_details(doc, document_reference)
+	details.update(
+		{
+			"e_invoice_status": compliance.get("e_invoice_status"),
+			"e_invoice_reference": compliance.get("e_invoice_reference"),
+			"e_waybill_status": compliance.get("e_waybill_status"),
+			"e_waybill_number": compliance.get("e_waybill_number"),
+		}
+	)
 
 	if document_reference in ("Purchase Order", "Subcontracting Order"):
 		details.update(

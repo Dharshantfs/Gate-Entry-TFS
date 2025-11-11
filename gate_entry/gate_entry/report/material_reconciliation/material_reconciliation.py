@@ -2,12 +2,23 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Iterable
 from typing import NamedTuple
 
 import frappe
 from frappe import _
 from frappe.utils import flt
+
+INBOUND_REFERENCES = {"Purchase Order", "Subcontracting Order"}
+OUTBOUND_REFERENCES = {"Sales Invoice", "Delivery Note"}
+SUPPORTED_DOCUMENT_REFERENCES = INBOUND_REFERENCES | OUTBOUND_REFERENCES
+REFERENCE_PARTY_FIELDS = {
+	"Purchase Order": ("supplier", "supplier_name"),
+	"Subcontracting Order": ("supplier", "supplier_name"),
+	"Sales Invoice": ("customer", "customer_name"),
+	"Delivery Note": ("customer", "customer_name"),
+}
 
 
 class Key(NamedTuple):
@@ -34,8 +45,26 @@ def get_columns() -> list[dict[str, object]]:
 
 	return [
 		{
-			"label": _("PO/SO Number"),
-			"fieldname": "po_so_number",
+			"label": _("Direction"),
+			"fieldname": "direction",
+			"fieldtype": "Data",
+			"width": 110,
+		},
+		{
+			"label": _("Document Type"),
+			"fieldname": "document_reference",
+			"fieldtype": "Data",
+			"width": 160,
+		},
+		{
+			"label": _("Reference Document"),
+			"fieldname": "reference_label",
+			"fieldtype": "Data",
+			"width": 220,
+		},
+		{
+			"label": _("Party"),
+			"fieldname": "party_name",
 			"fieldtype": "Data",
 			"width": 220,
 		},
@@ -59,7 +88,7 @@ def get_columns() -> list[dict[str, object]]:
 			"width": 140,
 		},
 		{
-			"label": _("Receipt Qty"),
+			"label": _("Reference Qty"),
 			"fieldname": "receipt_qty",
 			"fieldtype": "Float",
 			"width": 140,
@@ -82,6 +111,10 @@ def get_data(filters: frappe._dict) -> list[dict[str, object]]:
 	receipt_map = get_receipt_totals(filters, document_reference_filter)
 
 	keys = set(gate_pass_map) | set(receipt_map)
+	if not keys:
+		return []
+
+	reference_parties = get_reference_parties(keys)
 	item_name_cache: dict[str, str] = {}
 
 	data: list[dict[str, object]] = []
@@ -93,11 +126,29 @@ def get_data(filters: frappe._dict) -> list[dict[str, object]]:
 		receipt_qty = flt(receipt_row.get("receipt_qty") if receipt_row else 0)
 		discrepancy = gate_pass_qty - receipt_qty
 
+		party_details = reference_parties.get((key.document_reference, key.reference_number), {})
+		party_id = party_details.get("party")
+		party_name = party_details.get("party_name") or party_id or ""
+
+		if filters.get("customer"):
+			if key.document_reference in INBOUND_REFERENCES:
+				continue
+			if party_id != filters.customer:
+				continue
+
+		if filters.get("supplier") and key.document_reference in OUTBOUND_REFERENCES:
+			continue
+
 		item_name = determine_item_name(gate_pass_row, receipt_row, item_name_cache)
+		direction = determine_direction(gate_pass_row, key.document_reference)
 
 		data.append(
 			{
-				"po_so_number": format_reference_label(key.document_reference, key.reference_number),
+				"direction": direction,
+				"document_reference": key.document_reference,
+				"reference_label": format_reference_label(key.document_reference, key.reference_number),
+				"reference_number": key.reference_number,
+				"party_name": party_name,
 				"item_code": key.item_code,
 				"item_name": item_name,
 				"gate_pass_qty": gate_pass_qty,
@@ -116,7 +167,7 @@ def normalise_document_type(value: str | None) -> str | None:
 	if not value or value in {"All", ""}:
 		return None
 
-	if value in {"Purchase Order", "Subcontracting Order"}:
+	if value in SUPPORTED_DOCUMENT_REFERENCES:
 		return value
 
 	frappe.throw(_("Unsupported document type filter: {0}").format(value))
@@ -133,7 +184,8 @@ def get_gate_pass_totals(filters: frappe._dict, document_reference_filter: str |
 		conditions.append("gp.document_reference = %(document_reference)s")
 		values["document_reference"] = document_reference_filter
 	else:
-		conditions.append("gp.document_reference in ('Purchase Order', 'Subcontracting Order')")
+		allowed_references = "', '".join(sorted(SUPPORTED_DOCUMENT_REFERENCES))
+		conditions.append(f"gp.document_reference in ('{allowed_references}')")
 
 	if filters.get("from_date"):
 		conditions.append("gp.gate_pass_date >= %(from_date)s")
@@ -155,9 +207,15 @@ def get_gate_pass_totals(filters: frappe._dict, document_reference_filter: str |
         SELECT
             gp.document_reference,
             gp.reference_number,
+            MAX(gp.entry_type) AS entry_type,
             gpit.item_code,
             gpit.item_name,
-            SUM(gpit.received_qty) AS gate_pass_qty
+            SUM(
+                CASE
+                    WHEN gp.entry_type = 'Gate Out' THEN IFNULL(gpit.dispatched_qty, 0)
+                    ELSE IFNULL(gpit.received_qty, 0)
+                END
+            ) AS gate_pass_qty
         FROM `tabGate Pass` gp
         JOIN `tabGate Pass Table` gpit ON gpit.parent = gp.name
         WHERE {' AND '.join(conditions)}
@@ -175,7 +233,7 @@ def get_gate_pass_totals(filters: frappe._dict, document_reference_filter: str |
 
 
 def get_receipt_totals(filters: frappe._dict, document_reference_filter: str | None):
-	"""Aggregate receipt quantities from Purchase Receipts and Subcontracting Receipts."""
+	"""Aggregate quantities from downstream documents."""
 
 	receipt_map: dict[Key, dict[str, object]] = {}
 
@@ -185,11 +243,20 @@ def get_receipt_totals(filters: frappe._dict, document_reference_filter: str | N
 	if document_reference_filter in (None, "Subcontracting Order"):
 		receipt_map.update(get_subcontracting_receipt_totals(filters))
 
+	if document_reference_filter in (None, "Sales Invoice"):
+		receipt_map.update(get_sales_invoice_totals(filters))
+
+	if document_reference_filter in (None, "Delivery Note"):
+		receipt_map.update(get_delivery_note_totals(filters))
+
 	return receipt_map
 
 
 def get_purchase_receipt_totals(filters: frappe._dict):
 	"""Aggregate Purchase Receipt quantities keyed by Purchase Order and Item."""
+
+	if filters.get("customer"):
+		return {}
 
 	conditions = ["pr.docstatus = 1", "pri.purchase_order is not null"]
 	values: dict[str, object] = {}
@@ -235,6 +302,9 @@ def get_purchase_receipt_totals(filters: frappe._dict):
 def get_subcontracting_receipt_totals(filters: frappe._dict):
 	"""Aggregate Subcontracting Receipt quantities keyed by Subcontracting Order and Item."""
 
+	if filters.get("customer"):
+		return {}
+
 	conditions = ["sr.docstatus = 1", "sri.subcontracting_order is not null"]
 	values: dict[str, object] = {}
 
@@ -274,6 +344,145 @@ def get_subcontracting_receipt_totals(filters: frappe._dict):
 		receipt_map[key] = row
 
 	return receipt_map
+
+
+def get_sales_invoice_totals(filters: frappe._dict):
+	"""Aggregate Sales Invoice quantities keyed by Sales Invoice and Item."""
+
+	if filters.get("supplier"):
+		return {}
+
+	conditions = ["si.docstatus = 1"]
+	values: dict[str, object] = {}
+
+	if filters.get("from_date"):
+		conditions.append("si.posting_date >= %(si_from_date)s")
+		values["si_from_date"] = filters.from_date
+
+	if filters.get("to_date"):
+		conditions.append("si.posting_date <= %(si_to_date)s")
+		values["si_to_date"] = filters.to_date
+
+	if filters.get("customer"):
+		conditions.append("si.customer = %(si_customer)s")
+		values["si_customer"] = filters.customer
+
+	if filters.get("company"):
+		conditions.append("si.company = %(si_company)s")
+		values["si_company"] = filters.company
+
+	query = f"""
+        SELECT
+            sii.parent AS reference_number,
+            sii.item_code,
+            IFNULL(sii.item_name, '') AS item_name,
+            SUM(sii.qty) AS receipt_qty
+        FROM `tabSales Invoice Item` sii
+        JOIN `tabSales Invoice` si ON si.name = sii.parent
+        WHERE {' AND '.join(conditions)}
+        GROUP BY sii.parent, sii.item_code
+    """
+
+	results = frappe.db.sql(query, values, as_dict=True)
+
+	receipt_map: dict[Key, dict[str, object]] = {}
+	for row in results:
+		key = Key("Sales Invoice", row.reference_number, row.item_code)
+		receipt_map[key] = row
+
+	return receipt_map
+
+
+def get_delivery_note_totals(filters: frappe._dict):
+	"""Aggregate Delivery Note quantities keyed by Delivery Note and Item."""
+
+	if filters.get("supplier"):
+		return {}
+
+	conditions = ["dn.docstatus = 1"]
+	values: dict[str, object] = {}
+
+	if filters.get("from_date"):
+		conditions.append("dn.posting_date >= %(dn_from_date)s")
+		values["dn_from_date"] = filters.from_date
+
+	if filters.get("to_date"):
+		conditions.append("dn.posting_date <= %(dn_to_date)s")
+		values["dn_to_date"] = filters.to_date
+
+	if filters.get("customer"):
+		conditions.append("dn.customer = %(dn_customer)s")
+		values["dn_customer"] = filters.customer
+
+	if filters.get("company"):
+		conditions.append("dn.company = %(dn_company)s")
+		values["dn_company"] = filters.company
+
+	query = f"""
+        SELECT
+            dni.parent AS reference_number,
+            dni.item_code,
+            IFNULL(dni.item_name, '') AS item_name,
+            SUM(dni.qty) AS receipt_qty
+        FROM `tabDelivery Note Item` dni
+        JOIN `tabDelivery Note` dn ON dn.name = dni.parent
+        WHERE {' AND '.join(conditions)}
+        GROUP BY dni.parent, dni.item_code
+    """
+
+	results = frappe.db.sql(query, values, as_dict=True)
+
+	receipt_map: dict[Key, dict[str, object]] = {}
+	for row in results:
+		key = Key("Delivery Note", row.reference_number, row.item_code)
+		receipt_map[key] = row
+
+	return receipt_map
+
+
+def get_reference_parties(keys: Iterable[Key]):
+	"""Fetch party details for reference documents."""
+
+	reference_numbers: dict[str, set[str]] = defaultdict(set)
+	for key in keys:
+		if key.document_reference not in REFERENCE_PARTY_FIELDS:
+			continue
+		reference_numbers[key.document_reference].add(key.reference_number)
+
+	party_details: dict[tuple[str, str], dict[str, str | None]] = {}
+	for document_reference, names in reference_numbers.items():
+		if not names:
+			continue
+		party_field, party_name_field = REFERENCE_PARTY_FIELDS[document_reference]
+		records = frappe.get_all(
+			document_reference,
+			filters={"name": ["in", list(names)]},
+			fields=["name", party_field, party_name_field],
+		)
+		for record in records:
+			party = record.get(party_field)
+			party_name = record.get(party_name_field) or party
+			party_details[(document_reference, record.name)] = {
+				"party": party,
+				"party_name": party_name,
+			}
+
+	return party_details
+
+
+def determine_direction(gate_pass_row: dict[str, object] | None, document_reference: str | None) -> str:
+	"""Determine movement direction for the reconciliation row."""
+
+	if gate_pass_row and gate_pass_row.get("entry_type"):
+		return gate_pass_row.get("entry_type")
+
+	if document_reference in OUTBOUND_REFERENCES:
+		return "Gate Out"
+
+	if document_reference in INBOUND_REFERENCES:
+		return "Gate In"
+
+	return ""
 
 
 def determine_item_name(
@@ -346,6 +555,10 @@ def format_reference_label(document_reference: str, reference_number: str) -> st
 		prefix = _("PO")
 	elif document_reference == "Subcontracting Order":
 		prefix = _("SO")
+	elif document_reference == "Sales Invoice":
+		prefix = _("SI")
+	elif document_reference == "Delivery Note":
+		prefix = _("DN")
 	else:
 		prefix = document_reference
 
