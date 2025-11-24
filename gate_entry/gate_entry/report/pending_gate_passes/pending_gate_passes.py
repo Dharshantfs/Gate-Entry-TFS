@@ -16,6 +16,10 @@ from gate_entry.constants import (
 	REFERENCE_TOTAL_FIELDS,
 )
 from gate_entry.gate_entry.doctype.gate_pass.gate_pass import get_gst_settings, is_generated_status
+from gate_entry.stock_integration.report_utils import (
+	get_stock_entry_item_details,
+	get_stock_entry_warehouses,
+)
 
 
 def execute(filters: dict | None = None):
@@ -72,6 +76,43 @@ def get_columns() -> list[dict[str, object]]:
 			"width": 180,
 		},
 		{
+			"label": _("Stock Entry"),
+			"fieldname": "stock_entry",
+			"fieldtype": "Link",
+			"options": "Stock Entry",
+			"width": 160,
+		},
+		{
+			"label": _("Stock Entry Type"),
+			"fieldname": "stock_entry_type",
+			"fieldtype": "Data",
+			"width": 160,
+		},
+		{
+			"label": _("Stock Entry Posting Date"),
+			"fieldname": "se_posting_date",
+			"fieldtype": "Date",
+			"width": 110,
+		},
+		{
+			"label": _("Source Warehouses"),
+			"fieldname": "source_warehouses",
+			"fieldtype": "Data",
+			"width": 160,
+		},
+		{
+			"label": _("Target Warehouses"),
+			"fieldname": "target_warehouses",
+			"fieldtype": "Data",
+			"width": 160,
+		},
+		{
+			"label": _("Item Details"),
+			"fieldname": "item_details",
+			"fieldtype": "Data",
+			"width": 300,
+		},
+		{
 			"label": _("Party"),
 			"fieldname": "party_name",
 			"fieldtype": "Data",
@@ -115,6 +156,7 @@ def get_data(filters: frappe._dict) -> list[dict[str, object]]:
 	rows.sort(key=lambda row: (resolve_pending_date(row), row.gate_pass), reverse=True)
 
 	parties = get_reference_parties(rows)
+	stock_entry_data = get_stock_entry_data_for_pending(rows)
 	gst_settings = get_gst_settings() if outbound_rows else frappe._dict()
 	reference_totals: dict[tuple[str, str], float] = {}
 
@@ -149,6 +191,9 @@ def get_data(filters: frappe._dict) -> list[dict[str, object]]:
 				row, gst_settings, reference_totals
 			)
 
+		# Populate Stock Entry data
+		se_details = stock_entry_data.get(row.gate_pass, {})
+
 		data.append(
 			{
 				"gate_pass": row.gate_pass,
@@ -157,6 +202,12 @@ def get_data(filters: frappe._dict) -> list[dict[str, object]]:
 				"gate_pass_date": pending_date,
 				"reference_document": row.document_reference,
 				"reference_number": row.reference_number,
+				"stock_entry": row.get("stock_entry"),
+				"stock_entry_type": row.get("stock_entry_type"),
+				"se_posting_date": row.get("se_posting_date"),
+				"source_warehouses": se_details.get("source_warehouses"),
+				"target_warehouses": se_details.get("target_warehouses"),
+				"item_details": se_details.get("item_details"),
 				"party_name": party_name,
 				"compliance_status": compliance_status,
 				"total_items": int(row.total_items or 0),
@@ -179,7 +230,7 @@ def fetch_inbound_pending(
 	if entry_type_filter and entry_type_filter not in ("", "Gate In", None):
 		return []
 
-	if document_reference_filter and document_reference_filter not in INBOUND_REFERENCES:
+	if document_reference_filter and document_reference_filter not in INBOUND_REFERENCES | {"Stock Entry"}:
 		return []
 
 	conditions = [
@@ -195,7 +246,8 @@ def fetch_inbound_pending(
 		conditions.append("gp.document_reference = %(document_reference)s")
 		values["document_reference"] = document_reference_filter
 	else:
-		allowed_inbound = "', '".join(sorted(INBOUND_REFERENCES))
+		# Include Stock Entry in allowed references if no specific filter
+		allowed_inbound = "', '".join(sorted(INBOUND_REFERENCES | {"Stock Entry"}))
 		conditions.append(f"gp.document_reference in ('{allowed_inbound}')")
 
 	if filters.get("from_date"):
@@ -214,6 +266,20 @@ def fetch_inbound_pending(
 		conditions.append("gp.company = %(company)s")
 		values["company"] = filters.company
 
+	if filters.get("stock_entry"):
+		conditions.append("gp.reference_number = %(stock_entry)s")
+		conditions.append("gp.document_reference = 'Stock Entry'")
+		values["stock_entry"] = filters.stock_entry
+
+	if filters.get("stock_entry_type"):
+		conditions.append(
+			"(gp.document_reference != 'Stock Entry' OR se.stock_entry_type = %(stock_entry_type)s)"
+		)
+		values["stock_entry_type"] = filters.stock_entry_type
+
+	# Exclude cancelled Stock Entries
+	conditions.append("(gp.document_reference != 'Stock Entry' OR IFNULL(se.docstatus, 0) != 2)")
+
 	where_clause = " AND ".join(conditions)
 
 	return frappe.db.sql(
@@ -229,11 +295,15 @@ def fetch_inbound_pending(
             gp.reference_number,
             gp.supplier,
             gp.company,
+            se.name AS stock_entry,
+            se.stock_entry_type,
+            se.posting_date AS se_posting_date,
             NULL AS e_invoice_status,
             NULL AS e_waybill_status,
             COUNT(gpit.name) AS total_items
         FROM `tabGate Pass` gp
         LEFT JOIN `tabGate Pass Table` gpit ON gpit.parent = gp.name
+        LEFT JOIN `tabStock Entry` se ON (gp.document_reference = 'Stock Entry' AND gp.reference_number = se.name)
         WHERE {where_clause}
         GROUP BY gp.name
         ORDER BY pending_date DESC, gp.name DESC
@@ -253,7 +323,7 @@ def fetch_outbound_pending(
 	if entry_type_filter and entry_type_filter not in ("", "Gate Out", None):
 		return []
 
-	if document_reference_filter and document_reference_filter not in OUTBOUND_REFERENCES:
+	if document_reference_filter and document_reference_filter not in OUTBOUND_REFERENCES | {"Stock Entry"}:
 		return []
 
 	if filters.get("supplier"):
@@ -269,7 +339,7 @@ def fetch_outbound_pending(
 		conditions.append("gp.document_reference = %(document_reference)s")
 		values["document_reference"] = document_reference_filter
 	else:
-		allowed_outbound = "', '".join(sorted(OUTBOUND_REFERENCES))
+		allowed_outbound = "', '".join(sorted(OUTBOUND_REFERENCES | {"Stock Entry"}))
 		conditions.append(f"gp.document_reference in ('{allowed_outbound}')")
 
 	if filters.get("from_date"):
@@ -283,6 +353,20 @@ def fetch_outbound_pending(
 	if filters.get("company"):
 		conditions.append("gp.company = %(company)s")
 		values["company"] = filters.company
+
+	if filters.get("stock_entry"):
+		conditions.append("gp.reference_number = %(stock_entry)s")
+		conditions.append("gp.document_reference = 'Stock Entry'")
+		values["stock_entry"] = filters.stock_entry
+
+	if filters.get("stock_entry_type"):
+		conditions.append(
+			"(gp.document_reference != 'Stock Entry' OR se.stock_entry_type = %(stock_entry_type)s)"
+		)
+		values["stock_entry_type"] = filters.stock_entry_type
+
+	# Exclude cancelled Stock Entries
+	conditions.append("(gp.document_reference != 'Stock Entry' OR IFNULL(se.docstatus, 0) != 2)")
 
 	where_clause = " AND ".join(conditions)
 
@@ -299,11 +383,15 @@ def fetch_outbound_pending(
             gp.reference_number,
             gp.supplier,
             gp.company,
+            se.name AS stock_entry,
+            se.stock_entry_type,
+            se.posting_date AS se_posting_date,
             gp.e_invoice_status,
             gp.e_waybill_status,
             COUNT(gpit.name) AS total_items
         FROM `tabGate Pass` gp
         LEFT JOIN `tabGate Pass Table` gpit ON gpit.parent = gp.name
+        LEFT JOIN `tabStock Entry` se ON (gp.document_reference = 'Stock Entry' AND gp.reference_number = se.name)
         WHERE {where_clause}
         GROUP BY gp.name
         ORDER BY pending_date DESC, gp.name DESC
@@ -311,6 +399,31 @@ def fetch_outbound_pending(
 		values,
 		as_dict=True,
 	)
+
+
+def get_stock_entry_data_for_pending(rows: Iterable[frappe._dict]) -> dict[str, dict[str, str]]:
+	"""Fetch Stock Entry aggregated data for relevant rows."""
+
+	stock_entry_data = {}
+
+	for row in rows:
+		if row.document_reference == "Stock Entry" and row.reference_number:
+			s_warehouses, t_warehouses = get_stock_entry_warehouses(row.reference_number)
+			items = get_stock_entry_item_details(row.reference_number)
+
+			item_summary_list = []
+			for item in items:
+				qty = flt(item.qty)
+				uom = item.uom or ""
+				item_summary_list.append(f"{item.item_code}: {qty} {uom}")
+
+			stock_entry_data[row.gate_pass] = {
+				"source_warehouses": s_warehouses,
+				"target_warehouses": t_warehouses,
+				"item_details": ", ".join(item_summary_list),
+			}
+
+	return stock_entry_data
 
 
 def get_reference_parties(rows: Iterable[frappe._dict]) -> dict[tuple[str, str], dict[str, str | None]]:

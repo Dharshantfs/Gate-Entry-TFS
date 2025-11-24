@@ -4,7 +4,7 @@ from __future__ import annotations
 
 INBOUND_REFERENCES = frozenset({"Purchase Order", "Subcontracting Order"})
 OUTBOUND_REFERENCES = frozenset({"Sales Invoice", "Delivery Note"})
-ALL_REFERENCES = INBOUND_REFERENCES | OUTBOUND_REFERENCES
+ALL_REFERENCES = INBOUND_REFERENCES | OUTBOUND_REFERENCES | {"Stock Entry"}
 
 REFERENCE_PARTY_FIELDS = {
 	"Purchase Order": ("supplier", "supplier_name"),

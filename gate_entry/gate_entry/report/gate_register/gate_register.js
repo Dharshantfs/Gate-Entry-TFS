@@ -28,7 +28,22 @@ frappe.query_reports["Gate Register"] = {
 				"Subcontracting Order",
 				"Sales Invoice",
 				"Delivery Note",
+				"Stock Entry",
 			],
+		},
+		{
+			fieldname: "stock_entry_type",
+			label: __("Stock Entry Type"),
+			fieldtype: "Select",
+			options: ["", "Material Transfer", "Send to Subcontractor"],
+			depends_on: "eval:doc.document_reference == 'Stock Entry'",
+		},
+		{
+			fieldname: "warehouse",
+			label: __("Warehouse"),
+			fieldtype: "Link",
+			options: "Warehouse",
+			depends_on: "eval:doc.document_reference == 'Stock Entry'",
 		},
 		{
 			fieldname: "supplier",
