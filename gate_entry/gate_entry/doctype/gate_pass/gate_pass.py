@@ -11,19 +11,73 @@ from gate_entry.constants import (
 	OUTBOUND_REFERENCES,
 	REFERENCE_TOTAL_FIELDS,
 )
+from gate_entry.stock_integration import utils as stock_utils
+
+logger = frappe.logger("Gate Pass")
+
 
 class GatePass(Document):
 	def is_outbound_reference(self):
+		if self.document_reference == "Stock Entry":
+			return (self.entry_type or "").lower() != "gate in"
 		return self.document_reference in OUTBOUND_REFERENCES
 
 	def is_inbound_reference(self):
+		if self.document_reference == "Stock Entry":
+			return (self.entry_type or "").lower() == "gate in"
 		return self.document_reference in INBOUND_REFERENCES
+
+	def get_stock_entry_context(self):
+		entry_type = (self.entry_type or "Gate Out").lower()
+
+		if self.document_reference != "Stock Entry" or not self.reference_number:
+			return frappe._dict(
+				is_stock_entry=False,
+				entry_type=entry_type,
+			)
+
+		try:
+			stock_entry = frappe.get_cached_doc("Stock Entry", self.reference_number)
+		except frappe.DoesNotExistError:
+			return frappe._dict(
+				is_stock_entry=False,
+				entry_type=entry_type,
+			)
+
+		is_return = stock_utils.is_return_entry(stock_entry)
+		manual_return = cint(self.manual_return_flow) == 1 and not is_return
+
+		outbound_reference = None
+		if is_return:
+			outbound_reference = stock_utils.get_original_outbound_transfer(stock_entry)
+		elif manual_return:
+			outbound_reference = self.outbound_material_transfer or stock_entry.name
+
+		base_for_items = stock_entry
+		if entry_type == "gate in" and outbound_reference:
+			try:
+				base_for_items = frappe.get_cached_doc("Stock Entry", outbound_reference)
+			except frappe.DoesNotExistError:
+				base_for_items = stock_entry
+
+		return frappe._dict(
+			is_stock_entry=True,
+			entry_type=entry_type,
+			stock_entry=stock_entry,
+			is_return=is_return,
+			manual_return=manual_return,
+			outbound_reference=outbound_reference,
+			base_for_items=base_for_items,
+		)
 
 	def before_validate(self):
 		"""
 		Set derived values before validation
 		"""
 		self.set_entry_type()
+		context = self.get_stock_entry_context()
+		self.sync_stock_entry_links(context)
+		self.cleanup_discrepancy_fields()
 
 	def before_save(self):
 		"""
@@ -60,10 +114,76 @@ class GatePass(Document):
 		"""
 		Derive entry type from reference document
 		"""
+		if self.document_reference == "Stock Entry":
+			self.entry_type = self.derive_entry_type_from_stock_entry()
+			return
+
 		if self.is_outbound_reference():
 			self.entry_type = "Gate Out"
 		else:
 			self.entry_type = "Gate In"
+
+	def derive_entry_type_from_stock_entry(self):
+		if not self.reference_number:
+			return self.entry_type or "Gate Out"
+
+		try:
+			stock_entry = frappe.get_cached_doc("Stock Entry", self.reference_number)
+		except frappe.DoesNotExistError:
+			return self.entry_type or "Gate Out"
+
+		if cint(self.manual_return_flow):
+			return "Gate In"
+
+		if stock_utils.is_material_transfer(stock_entry):
+			if stock_utils.is_return_entry(stock_entry):
+				return "Gate In"
+			return "Gate Out"
+
+		if stock_utils.is_send_to_subcontractor(stock_entry):
+			return "Gate Out"
+
+		return self.entry_type or "Gate Out"
+
+	def sync_stock_entry_links(self, context=None):
+		context = context or self.get_stock_entry_context()
+
+		if not context.is_stock_entry:
+			self._clear_stock_entry_links()
+			return
+
+		stock_entry = context.stock_entry
+		self.stock_entry = stock_entry.name
+
+		if context.is_return:
+			self.return_material_transfer = stock_entry.name
+			self.outbound_material_transfer = context.outbound_reference
+			self.manual_return_flow = 0
+			return
+
+		if context.manual_return:
+			self.return_material_transfer = None
+			if context.outbound_reference:
+				self.outbound_material_transfer = context.outbound_reference
+			else:
+				self.outbound_material_transfer = None
+			return
+
+		self.return_material_transfer = None
+		self.outbound_material_transfer = None
+		self.manual_return_flow = 0
+
+	def _clear_stock_entry_links(self):
+		self.outbound_material_transfer = None
+		self.return_material_transfer = None
+		self.stock_entry = None
+		self.manual_return_flow = 0
+
+	def cleanup_discrepancy_fields(self):
+		if not cint(self.has_discrepancy):
+			self.lost_quantity = 0
+			self.damaged_quantity = 0
+			self.discrepancy_notes = None
 
 	def get_reference_doc(self):
 		"""
@@ -230,10 +350,13 @@ class GatePass(Document):
 		"""
 		Validate the Gate Pass document
 		"""
+		context = self.get_stock_entry_context()
 		reference_doc = None
 		reference_items = None
 
-		if self.is_outbound_reference():
+		if context.is_stock_entry:
+			reference_doc, reference_items = self.ensure_stock_entry_items(context)
+		elif self.is_outbound_reference():
 			reference_doc, reference_items = self.ensure_outbound_items()
 
 		# Validate that at least one item exists
@@ -248,30 +371,305 @@ class GatePass(Document):
 						_("Dispatched quantity for item {0} must be greater than zero").format(item.item_code)
 					)
 		else:
+			allow_zero = cint(self.manual_return_flow)
+			has_positive_receipt = False
 			for item in self.gate_pass_table:
-				if flt(item.received_qty) <= 0:
+				qty = flt(item.received_qty)
+				if qty < 0:
 					frappe.throw(
-						_("Received quantity for item {0} must be greater than zero").format(item.item_code)
+						_("Received quantity for item {0} cannot be negative").format(item.item_code)
 					)
+				if qty > 0:
+					has_positive_receipt = True
+
+			if not has_positive_receipt and not allow_zero:
+				frappe.throw(_("Please enter a received quantity greater than zero for at least one item."))
 
 		# Validate reference document
 		if self.document_reference and self.reference_number:
-			reference_doc = reference_doc or self.validate_reference_document()
-			self.populate_reference_defaults(reference_doc)
-			self.ensure_company_matches_reference(reference_doc)
+			if reference_doc:
+				doc_for_defaults = reference_doc
+			else:
+				doc_for_defaults = self.validate_reference_document()
+				reference_doc = doc_for_defaults
+
+			self.populate_reference_defaults(doc_for_defaults)
+			self.ensure_company_matches_reference(doc_for_defaults)
 
 			if self.is_inbound_reference():
-				self.validate_supplier(reference_doc)
+				self.validate_supplier(doc_for_defaults)
 			elif self.is_outbound_reference():
 				expected_items = reference_items
 				if not expected_items:
-					if self.document_reference == "Sales Invoice":
-						expected_items = get_sales_invoice_items(self.reference_number)
-					else:
-						expected_items = get_delivery_note_items(self.reference_number)
+					expected_items = self.fetch_reference_items()
 
 				self.validate_outbound_quantities(expected_items)
-				self.enforce_outbound_compliance(reference_doc)
+				self.enforce_outbound_compliance(doc_for_defaults)
+
+		if self.document_reference == "Stock Entry" and reference_doc:
+			allocation_doc = reference_doc
+			if self.entry_type == "Gate In" and self.outbound_material_transfer:
+				allocation_doc = context.base_for_items
+
+			self.validate_stock_entry_allocations(allocation_doc, context)
+
+		self.validate_discrepancy_quantities()
+
+	def fetch_reference_items(self):
+		if self.document_reference == "Sales Invoice":
+			return get_sales_invoice_items(self.reference_number)
+		if self.document_reference == "Delivery Note":
+			return get_delivery_note_items(self.reference_number)
+		if self.document_reference == "Stock Entry":
+			return self.get_stock_entry_items()
+		return []
+
+	def ensure_stock_entry_items(self, context=None):
+		context = context or self.get_stock_entry_context()
+
+		if not context.is_stock_entry:
+			return None, None
+
+		stock_entry = context.stock_entry
+		if stock_entry.docstatus != 1:
+			frappe.throw(_("Reference document {0} must be submitted").format(self.reference_number))
+
+		base_doc = context.base_for_items or stock_entry
+		reference_items = self.get_stock_entry_items(base_doc)
+		if not reference_items:
+			frappe.throw(_("Stock Entry {0} does not have any items.").format(base_doc.name))
+
+		entry_type = (context.entry_type or (self.entry_type or "Gate Out")).title()
+		existing_allocations = self.get_existing_stock_entry_allocations(base_doc.name, entry_type)
+
+		for item in reference_items:
+			order_item = item.get("order_item_name")
+			if not order_item:
+				continue
+			allocated = flt(existing_allocations.get(order_item, 0))
+			ordered = flt(item.get("ordered_qty") or 0)
+			item["pending_qty"] = max(ordered - allocated, 0)
+
+		self.align_gate_pass_items(reference_items, preserve_quantities=entry_type == "Gate In")
+		self.recalculate_item_amounts()
+
+		return stock_entry, reference_items
+
+	def get_stock_entry_items(self, stock_entry=None):
+		stock_entry = stock_entry or self.get_reference_doc()
+		is_gate_in = self.is_inbound_reference()
+
+		items = []
+		for row in stock_entry.items:
+			transfer_qty = flt(getattr(row, "transfer_qty", row.qty))
+			dispatched_qty = 0 if is_gate_in else transfer_qty
+			received_qty = 0
+			pending_qty = transfer_qty
+
+			items.append(
+				{
+					"item_code": row.item_code,
+					"item_name": row.item_name or "",
+					"description": row.description or "",
+					"uom": row.uom or row.stock_uom,
+					"stock_uom": row.stock_uom,
+					"conversion_factor": flt(row.conversion_factor) or 1.0,
+					"ordered_qty": transfer_qty,
+					"received_qty": received_qty,
+					"dispatched_qty": dispatched_qty,
+					"pending_qty": pending_qty,
+					"is_rate_contract": 0,
+					"rate": flt(row.basic_rate) or 0,
+					"amount": flt(row.basic_amount) or 0,
+					"warehouse": row.s_warehouse or row.t_warehouse,
+					"rejected_warehouse": None,
+					"expense_account": None,
+					"cost_center": row.cost_center,
+					"project": row.project,
+					"schedule_date": None,
+					"bom": None,
+					"include_exploded_items": 0,
+					"order_item_name": row.name,
+				}
+			)
+		return items
+
+	def populate_gate_pass_items(self, reference_items):
+		self.set("gate_pass_table", [])
+		for item in reference_items:
+			row = self.append("gate_pass_table", {})
+			for key, value in item.items():
+				row.set(key, value)
+
+	def align_gate_pass_items(self, reference_items, preserve_quantities=False):
+		if not reference_items:
+			self.set("gate_pass_table", [])
+			return
+
+		def get_key(item):
+			return item.get("order_item_name") or make_reference_item_key(
+				item.get("item_code"), item.get("order_item_name"), item.get("warehouse")
+			)
+
+		reference_map = {get_key(item): item for item in reference_items}
+
+		if not self.gate_pass_table:
+			self.populate_gate_pass_items(reference_items)
+			return
+
+		existing_map = {
+			row.order_item_name
+			or make_reference_item_key(row.item_code, row.order_item_name, row.warehouse): row
+			for row in self.gate_pass_table
+		}
+
+		if set(existing_map.keys()) != set(reference_map.keys()):
+			self.populate_gate_pass_items(reference_items)
+			return
+
+		quantity_field = "received_qty" if preserve_quantities else "dispatched_qty"
+
+		for key, item in reference_map.items():
+			row = existing_map[key]
+			preserved_value = flt(row.get(quantity_field) or 0)
+			for field, value in item.items():
+				if preserve_quantities and field == quantity_field:
+					continue
+				row.set(field, value)
+			if preserve_quantities:
+				row.set(quantity_field, preserved_value)
+
+	def recalculate_item_amounts(self):
+		is_outbound = self.is_outbound_reference()
+		for row in self.gate_pass_table:
+			quantity = flt(row.dispatched_qty) if is_outbound else flt(row.received_qty)
+			row.amount = flt(row.rate or 0) * quantity
+
+	def validate_discrepancy_quantities(self):
+		if not cint(self.has_discrepancy):
+			return
+
+		total_qty = sum(flt(item.get("dispatched_qty") or 0) for item in self.gate_pass_table)
+		if not total_qty:
+			total_qty = sum(flt(item.get("received_qty") or 0) for item in self.gate_pass_table)
+
+		lost_qty = flt(self.lost_quantity or 0)
+		damaged_qty = flt(self.damaged_quantity or 0)
+
+		if lost_qty < 0 or damaged_qty < 0:
+			frappe.throw(_("Lost/Damaged quantities cannot be negative."))
+
+		if total_qty and (lost_qty + damaged_qty) > total_qty:
+			frappe.throw(_("Total lost/damaged quantity cannot exceed movement quantity."))
+
+	def validate_stock_entry_allocations(self, stock_entry, context=None):
+		if not stock_entry:
+			return
+
+		entry_type = (context.entry_type if context else self.entry_type) or "Gate Out"
+		entry_type = entry_type.title()
+		target_map = {
+			row.name: flt(getattr(row, "transfer_qty", row.qty)) for row in getattr(stock_entry, "items", [])
+		}
+		if not target_map:
+			return
+
+		existing = self.get_existing_stock_entry_allocations(stock_entry.name, entry_type)
+		quantity_field = "dispatched_qty" if entry_type == "Gate Out" else "received_qty"
+
+		for item in self.gate_pass_table:
+			order_item = item.order_item_name
+			if not order_item:
+				continue
+
+			max_qty = target_map.get(order_item)
+			if max_qty is None:
+				continue
+
+			current = flt(item.get(quantity_field) or 0)
+			if current <= 0 and not (entry_type == "Gate In" and cint(self.manual_return_flow)):
+				frappe.throw(_("Quantity for item {0} must be greater than zero.").format(item.item_code))
+
+			allocated = flt(existing.get(order_item, 0))
+			if (allocated + current) - max_qty > 1e-6:
+				remaining = flt(max_qty - allocated)
+				frappe.throw(
+					_("Quantity for item {0} exceeds remaining balance ({1}).").format(
+						item.item_code, remaining
+					)
+				)
+
+	def get_existing_stock_entry_allocations(self, stock_entry_name, entry_type):
+		column = "dispatched_qty" if entry_type == "Gate Out" else "received_qty"
+
+		filters = [
+			["document_reference", "=", "Stock Entry"],
+			["docstatus", "<", 2],
+		]
+		if self.name:
+			filters.append(["name", "!=", self.name])
+
+		gate_pass_names = frappe.get_all(
+			"Gate Pass",
+			filters=filters,
+			or_filters=[
+				["Gate Pass", "reference_number", "=", stock_entry_name],
+				["Gate Pass", "outbound_material_transfer", "=", stock_entry_name],
+			],
+			pluck="name",
+		)
+
+		if not gate_pass_names:
+			return {}
+
+		records = frappe.db.get_all(
+			"Gate Pass Table",
+			filters={"parent": ["in", gate_pass_names]},
+			fields=["order_item_name", f"sum({column}) as total"],
+			group_by="order_item_name",
+		)
+
+		return {row.order_item_name: flt(row.total or 0) for row in records}
+
+	def update_stock_entry_reference(self):
+		if self.document_reference != "Stock Entry" or not self.reference_number:
+			return
+
+		if self.docstatus != 1:
+			return
+
+		if not frappe.db.exists("Stock Entry", self.reference_number):
+			return
+
+		frappe.db.set_value("Stock Entry", self.reference_number, "gate_pass", self.name)
+
+	def clear_stock_entry_reference(self):
+		"""
+		Clear the gate_pass reference from Stock Entry when Gate Pass is cancelled.
+		This allows the Gate Pass to be cancelled independently, similar to
+		how Purchase Receipt and Subcontracting Receipt work.
+		"""
+		if self.document_reference != "Stock Entry" or not self.reference_number:
+			return
+
+		if not frappe.db.exists("Stock Entry", self.reference_number):
+			return
+
+		try:
+			current_value = frappe.db.get_value("Stock Entry", self.reference_number, "gate_pass")
+			if current_value == self.name:
+				# Clear the reference even if Stock Entry is submitted
+				# This allows Gate Pass to be cancelled independently
+				frappe.db.set_value(
+					"Stock Entry", self.reference_number, "gate_pass", None, update_modified=False
+				)
+		except Exception as e:
+			# Log error but don't prevent Gate Pass cancellation
+			frappe.log_error(
+				message=frappe.get_traceback(),
+				title=_("Error clearing Stock Entry gate pass reference"),
+				exception=e,
+			)
 
 	def apply_compliance_details(self, details):
 		self.e_invoice_status = details.get("e_invoice_status")
@@ -377,12 +775,26 @@ class GatePass(Document):
 			self.check_receipts_in_amended_document()
 
 		frappe.msgprint(_("Gate Pass submitted successfully"))
+		self.update_stock_entry_reference()
 
 	def before_cancel(self):
 		"""
-		Prevent cancellation if Purchase Receipt or Subcontracting Receipt exists
+		Clear Stock Entry reference before cancellation to allow independent cancellation.
+		This must happen before Frappe's validation runs.
 		"""
+		# Clear Stock Entry reference first to break the link
+		# This allows Gate Pass to be cancelled independently
+		self.clear_stock_entry_reference()
+
+		# Check for linked receipts (Purchase Receipt, Subcontracting Receipt)
+		# Stock Entry is handled differently - we allow cancellation
 		self.check_linked_receipts_before_cancel()
+
+	def on_cancel(self):
+		"""
+		Actions after cancellation - reference is already cleared in before_cancel
+		"""
+		pass
 
 	def check_receipts_in_amended_document(self):
 		"""
@@ -533,6 +945,7 @@ def get_items(document_reference, reference_number):
 		"Subcontracting Order": get_subcontracting_order_items,
 		"Sales Invoice": get_sales_invoice_items,
 		"Delivery Note": get_delivery_note_items,
+		"Stock Entry": get_stock_entry_items_for_reference,
 	}
 
 	try:
@@ -717,6 +1130,45 @@ def get_delivery_note_items(delivery_note):
 				"order_item_name": dn_item.name,
 			}
 		)
+
+	return items
+
+
+def get_stock_entry_items_for_reference(stock_entry_name):
+	stock_entry = frappe.get_doc("Stock Entry", stock_entry_name)
+	is_return = cint(getattr(stock_entry, "is_return", 0))
+
+	items = []
+	for row in stock_entry.items:
+		transfer_qty = flt(getattr(row, "transfer_qty", row.qty))
+		logger.info(f"Stock Entry Item: {row.as_dict()}")
+
+		item = {
+			"item_code": row.item_code,
+			"item_name": row.item_name or "",
+			"description": row.description or "",
+			"uom": row.uom or row.stock_uom,
+			"stock_uom": row.stock_uom,
+			"conversion_factor": flt(row.conversion_factor) or 1.0,
+			"ordered_qty": transfer_qty,
+			"received_qty": 0,
+			"dispatched_qty": 0 if is_return else transfer_qty,
+			"pending_qty": transfer_qty,
+			"is_rate_contract": 0,
+			"rate": flt(row.basic_rate) or 0,
+			"amount": flt(row.basic_amount) or 0,
+			"warehouse": row.s_warehouse or row.t_warehouse,
+			"rejected_warehouse": None,
+			"expense_account": None,
+			"cost_center": row.cost_center,
+			"project": row.project,
+			"schedule_date": None,
+			"bom": None,
+			"include_exploded_items": 0,
+			"order_item_name": row.name,
+		}
+
+		items.append(item)
 
 	return items
 
@@ -1332,11 +1784,178 @@ def create_subcontracting_receipt(gate_pass_name):
 	return sr.name
 
 
-# Document Event Handlers for Purchase Receipt and Subcontracting Receipt
+@frappe.whitelist()
+def create_stock_entry_from_inbound_gate_pass(gate_pass_name):
+	"""
+	Create a reverse Material Transfer Stock Entry from an inbound Gate Pass
+	This creates a return Stock Entry that reverses the outbound material transfer
+
+	Args:
+		gate_pass_name: Name of the Gate Pass
+
+	Returns:
+		Name of the created Stock Entry
+	"""
+	# Check permissions
+	if not frappe.has_permission("Stock Entry", "create"):
+		frappe.throw(_("You don't have permission to create Stock Entry"))
+
+	# Get Gate Pass
+	gate_pass = frappe.get_doc("Gate Pass", gate_pass_name)
+
+	# Validate Gate Pass
+	if gate_pass.docstatus != 1:
+		frappe.throw(_("Gate Pass must be submitted before creating Stock Entry"))
+
+	if gate_pass.entry_type != "Gate In":
+		frappe.throw(_("This function is only available for inbound Gate Passes"))
+
+	if not gate_pass.outbound_material_transfer:
+		frappe.throw(
+			_("This Gate Pass must reference an outbound Material Transfer to create a return Stock Entry")
+		)
+
+	if gate_pass.return_material_transfer:
+		frappe.throw(_("Stock Entry has already been created for this Gate Pass"))
+
+	if gate_pass.document_reference != "Stock Entry":
+		frappe.throw(_("This Gate Pass is not linked to a Stock Entry"))
+
+	# Get the outbound Stock Entry
+	outbound_stock_entry = frappe.get_doc("Stock Entry", gate_pass.outbound_material_transfer)
+
+	# Validate outbound Stock Entry
+	if outbound_stock_entry.docstatus != 1:
+		frappe.throw(
+			_("Outbound Stock Entry {0} must be submitted").format(gate_pass.outbound_material_transfer)
+		)
+
+	if not stock_utils.is_material_transfer(outbound_stock_entry):
+		frappe.throw(
+			_("Outbound Stock Entry {0} must be a Material Transfer").format(
+				gate_pass.outbound_material_transfer
+			)
+		)
+
+	# Create Stock Entry with return flag
+	stock_entry = frappe.new_doc("Stock Entry")
+	stock_entry.stock_entry_type = "Material Transfer"
+	stock_entry.is_return = 1
+	stock_entry.return_against = outbound_stock_entry.name
+	stock_entry.company = gate_pass.company
+	stock_entry.posting_date = gate_pass.gate_entry_date or nowdate()
+	stock_entry.posting_time = gate_pass.gate_entry_time or nowtime()
+	stock_entry.set_posting_time = 1
+
+	# Link back to gate pass
+	stock_entry.gate_pass = gate_pass_name
+
+	# Copy vehicle details if available (only if fields exist on Stock Entry)
+	# Note: These fields may be custom fields added by other apps
+	if gate_pass.vehicle_number and hasattr(stock_entry, "vehicle_no"):
+		stock_entry.vehicle_no = gate_pass.vehicle_number
+	if gate_pass.driver_name and hasattr(stock_entry, "driver_name"):
+		stock_entry.driver_name = gate_pass.driver_name
+	if gate_pass.driver_contact and hasattr(stock_entry, "driver_contact"):
+		stock_entry.driver_contact = gate_pass.driver_contact
+
+	# Create a map of outbound items by order_item_name for reference
+	outbound_item_map = {row.name: row for row in outbound_stock_entry.items}
+
+	# Add items from gate pass - reverse the warehouses
+	for gate_pass_item in gate_pass.gate_pass_table:
+		received_qty = flt(gate_pass_item.received_qty)
+		if received_qty <= 0:
+			continue
+
+		# Find the corresponding outbound item
+		outbound_item = None
+		if gate_pass_item.order_item_name:
+			outbound_item = outbound_item_map.get(gate_pass_item.order_item_name)
+
+		if not outbound_item:
+			frappe.throw(
+				_("Could not find corresponding item {0} in outbound Stock Entry {1}").format(
+					gate_pass_item.item_code, gate_pass.outbound_material_transfer
+				)
+			)
+
+		# Reverse warehouses: outbound's t_warehouse becomes source, s_warehouse becomes target
+		s_warehouse = outbound_item.t_warehouse  # Where material is coming from (was destination)
+		t_warehouse = outbound_item.s_warehouse  # Where material is going to (was source)
+
+		if not s_warehouse or not t_warehouse:
+			frappe.throw(
+				_("Item {0} in outbound Stock Entry must have both source and target warehouses").format(
+					gate_pass_item.item_code
+				)
+			)
+
+		# Calculate quantities
+		conversion_factor = flt(gate_pass_item.conversion_factor) or 1.0
+		stock_qty = received_qty * conversion_factor
+
+		# Create Stock Entry item
+		se_item = {
+			"item_code": gate_pass_item.item_code,
+			"item_name": gate_pass_item.item_name or "",
+			"description": gate_pass_item.description or "",
+			"s_warehouse": s_warehouse,
+			"t_warehouse": t_warehouse,
+			"qty": received_qty,
+			"transfer_qty": stock_qty,
+			"uom": gate_pass_item.uom or gate_pass_item.stock_uom,
+			"stock_uom": gate_pass_item.stock_uom,
+			"conversion_factor": conversion_factor,
+			"cost_center": gate_pass_item.cost_center or outbound_item.cost_center,
+			"project": gate_pass_item.project or outbound_item.project,
+			"basic_rate": flt(gate_pass_item.rate) or flt(outbound_item.basic_rate) or 0,
+			"basic_amount": flt(gate_pass_item.amount) or (received_qty * flt(outbound_item.basic_rate) or 0),
+		}
+
+		# Copy additional fields from outbound item if they exist
+		for field in ["expense_account", "serial_and_batch_bundle", "batch_no", "serial_no"]:
+			if hasattr(outbound_item, field) and getattr(outbound_item, field):
+				se_item[field] = getattr(outbound_item, field)
+
+		stock_entry.append("items", se_item)
+
+	# Validate that at least one item was added
+	if not stock_entry.items:
+		frappe.throw(_("No items with positive received quantities found in Gate Pass"))
+
+	# Add doc_references for ITC-04 reporting (required by India Compliance)
+	# This references the original outbound Stock Entry
+	# The doc_references field is added by India Compliance app and is required
+	# for return material transfers to pass validation
+	stock_entry.append(
+		"doc_references",
+		{
+			"link_doctype": "Stock Entry",
+			"link_name": outbound_stock_entry.name,
+		},
+	)
+
+	# Set missing values (calculates totals, etc.)
+	stock_entry.set_missing_values()
+
+	# Insert the Stock Entry (as draft)
+	stock_entry.insert()
+
+	# Update Gate Pass with return Stock Entry reference
+	gate_pass.return_material_transfer = stock_entry.name
+	gate_pass.stock_entry = stock_entry.name
+	gate_pass.reference_number = stock_entry.name
+	gate_pass.save(ignore_permissions=True)
+
+	return stock_entry.name
+
+
+# Document Event Handlers for Purchase Receipt, Subcontracting Receipt, and Stock Entry
 # ------------------------------------------------------------------------
 # Note: Gate Pass is in ignore_links_on_delete (hooks.py) which allows
-# Purchase Receipts and Subcontracting Receipts to be deleted even when linked.
-# These handlers clean up the Gate Pass references when receipts are deleted/cancelled.
+# Purchase Receipts, Subcontracting Receipts, and Stock Entries to be deleted even when linked.
+# These handlers clean up the Gate Pass references when receipts/entries are deleted/cancelled.
 
 
 def on_purchase_receipt_trash(doc, method):
@@ -1371,6 +1990,37 @@ def on_subcontracting_receipt_cancel(doc, method):
 		clear_gate_pass_reference(doc.get("gate_pass"), "subcontracting_receipt")
 
 
+def on_stock_entry_cancel(doc, method):
+	"""
+	Clear Gate Pass references when Stock Entry is cancelled.
+	This ensures Gate Passes don't hold references to cancelled Stock Entries.
+	"""
+	# Clear gate_pass field on Stock Entry (if it exists)
+	if doc.get("gate_pass"):
+		clear_stock_entry_gate_pass_reference(doc.name, doc.get("gate_pass"))
+
+	# Clear all Gate Pass references to this Stock Entry
+	clear_gate_pass_stock_entry_references(doc.name)
+
+	# Cancel auto-created gate passes for this stock entry
+	from gate_entry.stock_integration import utils
+
+	utils.cancel_gate_passes_for_stock_entry(doc)
+
+
+def on_stock_entry_trash(doc, method):
+	"""
+	Clear Gate Pass references when Stock Entry is deleted.
+	This ensures Gate Passes don't hold references to deleted Stock Entries.
+	"""
+	# Clear gate_pass field on Stock Entry (if it exists)
+	if doc.get("gate_pass"):
+		clear_stock_entry_gate_pass_reference(doc.name, doc.get("gate_pass"))
+
+	# Clear all Gate Pass references to this Stock Entry
+	clear_gate_pass_stock_entry_references(doc.name)
+
+
 def clear_gate_pass_reference(gate_pass_name, field_name):
 	"""
 	Clear the receipt reference from Gate Pass
@@ -1395,3 +2045,145 @@ def clear_gate_pass_reference(gate_pass_name, field_name):
 		frappe.log_error(
 			message=frappe.get_traceback(), title=_("Error clearing Gate Pass reference"), exception=e
 		)
+
+
+def clear_stock_entry_gate_pass_reference(stock_entry_name, gate_pass_name):
+	"""
+	Clear the gate_pass reference from Stock Entry when it's cancelled or deleted.
+	This allows the Gate Pass to be cancelled independently and new Gate Passes
+	to be created for the same Stock Entry.
+
+	Args:
+		stock_entry_name: Name of the Stock Entry
+		gate_pass_name: Name of the Gate Pass
+	"""
+	if not stock_entry_name or not gate_pass_name:
+		return
+
+	try:
+		# Clear the gate_pass field in Stock Entry
+		# This breaks the link so the Gate Pass can be cancelled and new ones can be created
+		frappe.db.set_value("Stock Entry", stock_entry_name, "gate_pass", None, update_modified=False)
+
+		frappe.msgprint(
+			_("Gate Pass {0} reference has been cleared from Stock Entry {1}.").format(
+				frappe.utils.get_link_to_form("Gate Pass", gate_pass_name),
+				frappe.utils.get_link_to_form("Stock Entry", stock_entry_name),
+			)
+		)
+	except Exception as e:
+		frappe.log_error(
+			message=frappe.get_traceback(),
+			title=_("Error clearing Stock Entry gate pass reference"),
+			exception=e,
+		)
+
+
+def clear_gate_pass_stock_entry_references(stock_entry_name):
+	"""
+	Clear all Gate Pass references to a deleted Stock Entry.
+	This includes:
+	- reference_number (when document_reference == "Stock Entry")
+	- return_material_transfer
+	- outbound_material_transfer
+	- stock_entry
+
+	Args:
+		stock_entry_name: Name of the deleted Stock Entry
+	"""
+	if not stock_entry_name:
+		return
+
+	try:
+		# Find all Gate Passes that reference this Stock Entry
+		gate_passes = frappe.get_all(
+			"Gate Pass",
+			filters={
+				"docstatus": ["<", 2],  # Not cancelled
+			},
+			or_filters=[
+				["reference_number", "=", stock_entry_name],
+				["return_material_transfer", "=", stock_entry_name],
+				["outbound_material_transfer", "=", stock_entry_name],
+				["stock_entry", "=", stock_entry_name],
+			],
+			fields=[
+				"name",
+				"reference_number",
+				"return_material_transfer",
+				"outbound_material_transfer",
+				"stock_entry",
+				"document_reference",
+			],
+		)
+
+		if not gate_passes:
+			return
+
+		cleared_count = 0
+		for gp in gate_passes:
+			updates = {}
+
+			# Clear reference_number if it points to this Stock Entry
+			if gp.reference_number == stock_entry_name and gp.document_reference == "Stock Entry":
+				updates["reference_number"] = None
+
+			# Clear return_material_transfer if it points to this Stock Entry
+			if gp.return_material_transfer == stock_entry_name:
+				updates["return_material_transfer"] = None
+
+			# Clear outbound_material_transfer if it points to this Stock Entry
+			if gp.outbound_material_transfer == stock_entry_name:
+				updates["outbound_material_transfer"] = None
+
+			# Clear stock_entry if it points to this Stock Entry
+			if gp.stock_entry == stock_entry_name:
+				updates["stock_entry"] = None
+
+			if updates:
+				# Update the Gate Pass
+				for field, value in updates.items():
+					frappe.db.set_value("Gate Pass", gp.name, field, value, update_modified=False)
+				cleared_count += 1
+
+		if cleared_count > 0:
+			frappe.msgprint(
+				_("Cleared Stock Entry {0} references from {1} Gate Pass(es).").format(
+					frappe.utils.get_link_to_form("Stock Entry", stock_entry_name),
+					cleared_count,
+				)
+			)
+	except Exception as e:
+		frappe.log_error(
+			message=frappe.get_traceback(),
+			title=_("Error clearing Gate Pass Stock Entry references"),
+			exception=e,
+		)
+
+
+def on_stock_entry_submit(doc, method):
+	"""
+	Handle Stock Entry submission - auto-create Gate Pass for eligible entries
+	"""
+	if doc.doctype != "Stock Entry" or doc.docstatus != 1:
+		return
+
+	from gate_entry.stock_integration import utils
+
+	if not utils.is_material_transfer(doc) and not utils.is_send_to_subcontractor(doc):
+		return
+
+	if utils.is_material_transfer(doc) and not utils.is_external_transfer(doc):
+		return
+
+	frappe.enqueue(
+		utils.create_gate_pass_from_stock_entry,
+		stock_entry_name=doc.name,
+		enqueued_by=frappe.session.user,
+		queue="long",
+		now=frappe.flags.in_test,
+	)
+
+
+# Document Event Handlers for Stock Entry
+# ------------------------------------------------------------------------

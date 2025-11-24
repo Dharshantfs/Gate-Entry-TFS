@@ -1,0 +1,121 @@
+from __future__ import annotations
+
+import frappe
+from frappe import _
+from frappe.utils import cint
+
+
+def is_material_transfer(stock_entry) -> bool:
+	return getattr(stock_entry, "stock_entry_type", None) == "Material Transfer"
+
+
+def is_send_to_subcontractor(stock_entry) -> bool:
+	return getattr(stock_entry, "stock_entry_type", None) == "Send to Subcontractor"
+
+
+def is_external_transfer(stock_entry) -> bool:
+	return cint(getattr(stock_entry, "ge_external_transfer", 0)) == 1
+
+
+def is_return_entry(stock_entry) -> bool:
+	return cint(getattr(stock_entry, "is_return", 0)) == 1
+
+
+def get_original_outbound_transfer(stock_entry):
+	if is_return_entry(stock_entry):
+		return getattr(stock_entry, "return_against", None)
+	return getattr(stock_entry, "ge_outbound_reference", None)
+
+
+def get_linked_return_transfer(stock_entry):
+	return getattr(stock_entry, "ge_linked_return_transfer", None)
+
+
+def create_gate_pass_from_stock_entry(stock_entry_name: str, enqueued_by: str | None = None):
+	stock_entry = frappe.get_doc("Stock Entry", stock_entry_name)
+
+	if stock_entry.docstatus != 1:
+		return
+
+	if is_material_transfer(stock_entry) and not is_external_transfer(stock_entry):
+		return
+
+	is_return = is_return_entry(stock_entry)
+
+	if is_return:
+		existing = frappe.get_all(
+			"Gate Pass",
+			filters={
+				"document_reference": "Stock Entry",
+				"entry_type": "Gate In",
+				"docstatus": 0,
+				"outbound_material_transfer": stock_entry.return_against,
+			},
+			pluck="name",
+		)
+
+		if existing:
+			gate_pass = frappe.get_doc("Gate Pass", existing[0])
+			gate_pass.reference_number = stock_entry.name
+			gate_pass.manual_return_flow = 0
+			gate_pass.return_material_transfer = stock_entry.name
+			gate_pass.stock_entry_reference = stock_entry.name
+			gate_pass.document_reference = "Stock Entry"
+			gate_pass.entry_type = "Gate In"
+
+			gate_pass.populate_gate_pass_items(gate_pass.get_stock_entry_items(stock_entry))
+			gate_pass.save(ignore_permissions=True)
+
+			frappe.db.commit()
+			return
+
+	existing_gate_passes = frappe.get_all(
+		"Gate Pass",
+		filters={"reference_document": "Stock Entry", "reference_number": stock_entry.name},
+		pluck="name",
+	)
+
+	if existing_gate_passes:
+		return
+
+	gate_pass = frappe.new_doc("Gate Pass")
+	gate_pass.document_reference = "Stock Entry"
+	gate_pass.reference_number = stock_entry.name
+	gate_pass.company = stock_entry.company
+	gate_pass.vehicle_number = stock_entry.vehicle_no or ""
+	gate_pass.driver_name = ""
+	gate_pass.driver_contact = ""
+	gate_pass.entry_type = "Gate Out"
+	gate_pass.stock_entry_reference = stock_entry.name
+
+	if is_return:
+		gate_pass.entry_type = "Gate In"
+		gate_pass.return_material_transfer = stock_entry.name
+		gate_pass.outbound_material_transfer = stock_entry.return_against
+		gate_pass.manual_return_flow = 0
+	elif is_material_transfer(stock_entry) or is_send_to_subcontractor(stock_entry):
+		gate_pass.entry_type = "Gate Out"
+
+	gate_pass.populate_gate_pass_items(gate_pass.get_stock_entry_items(stock_entry))
+	gate_pass.insert(ignore_permissions=True)
+
+	frappe.db.commit()
+
+
+def cancel_gate_passes_for_stock_entry(stock_entry):
+	gate_passes = frappe.get_all(
+		"Gate Pass",
+		filters={"document_reference": "Stock Entry", "reference_number": stock_entry.name},
+		pluck="name",
+	)
+
+	for name in gate_passes:
+		try:
+			gate_pass = frappe.get_doc("Gate Pass", name)
+			if gate_pass.docstatus == 1:
+				gate_pass.cancel()
+			elif gate_pass.docstatus == 0:
+				gate_pass.delete()
+		except Exception:
+			frappe.log_error(title="Gate Pass cancellation failed", message=frappe.get_traceback())
+
