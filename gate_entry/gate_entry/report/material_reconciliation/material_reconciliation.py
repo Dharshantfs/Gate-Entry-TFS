@@ -16,8 +16,15 @@ from gate_entry.constants import (
 	OUTBOUND_REFERENCES,
 	REFERENCE_PARTY_FIELDS,
 )
+from gate_entry.stock_integration.report_utils import (
+	get_stock_entry_allocated_quantities,
+	get_stock_entry_item_details,
+	get_stock_entry_metadata,
+	get_stock_entry_warehouses,
+	is_stock_entry_cancelled,
+)
 
-SUPPORTED_DOCUMENT_REFERENCES = ALL_REFERENCES
+SUPPORTED_DOCUMENT_REFERENCES = ALL_REFERENCES | {"Stock Entry"}
 
 
 class Key(NamedTuple):
@@ -60,6 +67,25 @@ def get_columns() -> list[dict[str, object]]:
 			"fieldname": "reference_label",
 			"fieldtype": "Data",
 			"width": 220,
+		},
+		{
+			"label": _("Stock Entry"),
+			"fieldname": "stock_entry",
+			"fieldtype": "Link",
+			"options": "Stock Entry",
+			"width": 160,
+		},
+		{
+			"label": _("Stock Entry Type"),
+			"fieldname": "stock_entry_type",
+			"fieldtype": "Data",
+			"width": 160,
+		},
+		{
+			"label": _("Warehouses"),
+			"fieldname": "warehouses",
+			"fieldtype": "Data",
+			"width": 200,
 		},
 		{
 			"label": _("Party"),
@@ -118,6 +144,10 @@ def get_data(filters: frappe._dict) -> list[dict[str, object]]:
 
 	data: list[dict[str, object]] = []
 	for key in sorted(keys):
+		# Exclude cancelled Stock Entries
+		if key.document_reference == "Stock Entry" and is_stock_entry_cancelled(key.reference_number):
+			continue
+
 		gate_pass_row = gate_pass_map.get(key)
 		receipt_row = receipt_map.get(key)
 
@@ -138,8 +168,45 @@ def get_data(filters: frappe._dict) -> list[dict[str, object]]:
 		if filters.get("supplier") and key.document_reference in OUTBOUND_REFERENCES:
 			continue
 
+		# Filters for Stock Entry
+		if key.document_reference == "Stock Entry":
+			if filters.get("stock_entry") and key.reference_number != filters.stock_entry:
+				continue
+			# Type filter is tricky as we need to fetch type.
+			# We will fetch metadata below and filter then.
+
 		item_name = determine_item_name(gate_pass_row, receipt_row, item_name_cache)
 		direction = determine_direction(gate_pass_row, key.document_reference)
+
+		# Enrich with Stock Entry data
+		se_link = None
+		se_type = None
+		se_warehouses = None
+
+		if key.document_reference == "Stock Entry":
+			se_link = key.reference_number
+			meta = get_stock_entry_metadata(se_link)
+			se_type = meta.get("stock_entry_type")
+
+			if filters.get("stock_entry_type") and se_type != filters.stock_entry_type:
+				continue
+
+			s_wh, t_wh = get_stock_entry_warehouses(se_link)
+			warehouses = []
+			if s_wh:
+				warehouses.append(f"Src: {s_wh}")
+			if t_wh:
+				warehouses.append(f"Tgt: {t_wh}")
+			se_warehouses = ", ".join(warehouses)
+
+			# Also use item details from Stock Entry if name is missing
+			if not item_name:
+				item_details = get_stock_entry_item_details(se_link)
+				for item in item_details:
+					if item.item_code == key.item_code:
+						item_name = item.item_name
+						item_name_cache[key.item_code] = item_name
+						break
 
 		data.append(
 			{
@@ -147,6 +214,9 @@ def get_data(filters: frappe._dict) -> list[dict[str, object]]:
 				"document_reference": key.document_reference,
 				"reference_label": format_reference_label(key.document_reference, key.reference_number),
 				"reference_number": key.reference_number,
+				"stock_entry": se_link,
+				"stock_entry_type": se_type,
+				"warehouses": se_warehouses,
 				"party_name": party_name,
 				"item_code": key.item_code,
 				"item_name": item_name,
@@ -202,6 +272,12 @@ def get_gate_pass_totals(filters: frappe._dict, document_reference_filter: str |
 		conditions.append("gp.company = %(company)s")
 		values["company"] = filters.company
 
+	# For Stock Entry, we might want to filter by reference number in main query if passed
+	if filters.get("stock_entry"):
+		# This optimizes if filtering by specific stock entry
+		conditions.append("gp.reference_number = %(stock_entry)s")
+		values["stock_entry"] = filters.stock_entry
+
 	query = f"""
         SELECT
             gp.document_reference,
@@ -247,6 +323,82 @@ def get_receipt_totals(filters: frappe._dict, document_reference_filter: str | N
 
 	if document_reference_filter in (None, "Delivery Note"):
 		receipt_map.update(get_delivery_note_totals(filters))
+
+	if document_reference_filter in (None, "Stock Entry"):
+		receipt_map.update(get_stock_entry_totals(filters))
+
+	return receipt_map
+
+
+def get_stock_entry_totals(filters: frappe._dict):
+	"""Aggregate Stock Entry allocated totals."""
+
+	if filters.get("customer") or filters.get("supplier"):
+		# Stock Entries don't really map to these directly in the same way
+		return {}
+
+	# Strategy:
+	# We need keys (Stock Entry, Item Code) -> Quantity
+	# We can iterate through all relevant Stock Entries found in Gate Passes
+	# But we need to support cases where we want to see Stock Entries regardless?
+	# No, this report is "Material Reconciliation", usually reconciling Gate Pass vs Doc.
+	# So we only care about Stock Entries that HAVE gate passes (which get_gate_pass_totals finds).
+	# OR we find all Stock Entries in date range.
+	# But "Allocated Qty" is defined as "Sum of Gate Pass Qtys".
+	# So we can just query Gate Passes again or reuse logic.
+
+	# Efficient way:
+	# 1. Get relevant Stock Entry names from filters (date range etc) OR from the gate_pass_map keys if we had access.
+	# Since we don't have gate_pass_map here, we query.
+
+	# Actually, reusing the logic in `get_stock_entry_allocated_quantities` utility is good but doing it one by one is slow.
+	# We should implement a bulk fetch here similar to other `get_..._totals`.
+
+	conditions = ["gp.docstatus = 1", "gp.document_reference = 'Stock Entry'"]
+	values: dict[str, object] = {}
+
+	if filters.get("from_date"):
+		conditions.append("gp.gate_pass_date >= %(from_date)s")
+		values["from_date"] = filters.from_date
+
+	if filters.get("to_date"):
+		conditions.append("gp.gate_pass_date <= %(to_date)s")
+		values["to_date"] = filters.to_date
+
+	if filters.get("stock_entry"):
+		conditions.append("gp.reference_number = %(stock_entry)s")
+		values["stock_entry"] = filters.stock_entry
+
+	# Include return transfers?
+	# "The report must handle return material transfers by comparing return Stock Entry allocated quantities with inbound Gate Pass quantities."
+	# For manual return flow, `reference_number` is the Outbound Stock Entry initially, then becomes Return Stock Entry?
+	# If `reference_number` points to the Stock Entry we are reconciling against, then the query below works.
+
+	query = f"""
+        SELECT
+            gp.reference_number,
+            gpit.item_code,
+            MAX(gpit.item_name) as item_name,
+            SUM(
+                CASE
+                    WHEN gp.entry_type = 'Gate Out' THEN IFNULL(gpit.dispatched_qty, 0)
+                    ELSE IFNULL(gpit.received_qty, 0)
+                END
+            ) AS receipt_qty
+        FROM `tabGate Pass` gp
+        JOIN `tabGate Pass Table` gpit ON gpit.parent = gp.name
+        WHERE {' AND '.join(conditions)}
+        GROUP BY gp.reference_number, gpit.item_code
+    """
+
+	results = frappe.db.sql(query, values, as_dict=True)
+
+	receipt_map: dict[Key, dict[str, object]] = {}
+	for row in results:
+		if not row.reference_number:
+			continue
+		key = Key("Stock Entry", row.reference_number, row.item_code)
+		receipt_map[key] = row
 
 	return receipt_map
 
@@ -481,6 +633,11 @@ def determine_direction(gate_pass_row: dict[str, object] | None, document_refere
 	if document_reference in INBOUND_REFERENCES:
 		return "Gate In"
 
+	if document_reference == "Stock Entry":
+		# We can't determine easily without row data, assume Gate Out default or mixed?
+		# Actually, gate_pass_row usually exists if there's data.
+		pass
+
 	return ""
 
 
@@ -558,6 +715,8 @@ def format_reference_label(document_reference: str, reference_number: str) -> st
 		prefix = _("SI")
 	elif document_reference == "Delivery Note":
 		prefix = _("DN")
+	elif document_reference == "Stock Entry":
+		prefix = _("SE")
 	else:
 		prefix = document_reference
 

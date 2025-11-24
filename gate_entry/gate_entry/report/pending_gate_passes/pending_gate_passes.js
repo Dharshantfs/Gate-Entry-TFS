@@ -28,7 +28,28 @@ frappe.query_reports["Pending Gate Passes"] = {
 				"Subcontracting Order",
 				"Sales Invoice",
 				"Delivery Note",
+				"Stock Entry",
 			],
+		},
+		{
+			fieldname: "stock_entry_type",
+			label: __("Stock Entry Type"),
+			fieldtype: "Select",
+			options: ["", "Material Transfer", "Send to Subcontractor"],
+			depends_on: "eval:doc.document_reference == 'Stock Entry'",
+		},
+		{
+			fieldname: "stock_entry",
+			label: __("Stock Entry"),
+			fieldtype: "Link",
+			options: "Stock Entry",
+			get_query: function () {
+				return {
+					filters: {
+						docstatus: ["!=", 2],
+					},
+				};
+			},
 		},
 		{
 			fieldname: "supplier",
