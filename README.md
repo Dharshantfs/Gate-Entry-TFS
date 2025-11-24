@@ -1,4 +1,5 @@
 ### Gate Entry
+[WARNING] Entire Module is Vibe Coded on Cursor, It kinda works!
 
 An erpnext security gate module for recording material and people movement
 
