@@ -397,7 +397,7 @@ function load_reference_details(frm) {
 			if (details.driver_contact && !frm.doc.driver_contact) {
 				updates.driver_contact = details.driver_contact;
 			}
-			if (is_outbound_reference(frm.doc.document_reference)) {
+			if (is_outbound_reference(frm.doc.document_reference, frm.doc.entry_type)) {
 				updates.supplier = null;
 				updates.supplier_delivery_note = null;
 			} else if (details.party_type === "Supplier" && details.party) {
@@ -520,7 +520,7 @@ function refresh_compliance_status(frm) {
 	if (
 		!frm.doc.document_reference ||
 		!frm.doc.reference_number ||
-		!is_outbound_reference(frm.doc.document_reference)
+		!is_outbound_reference(frm.doc.document_reference, frm.doc.entry_type)
 	) {
 		clear_compliance_status(frm);
 		return;
