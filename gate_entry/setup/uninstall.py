@@ -69,8 +69,10 @@ def delete_gate_entry_custom_fields():
 			print(f"Warning: Could not delete {doctype}.{fieldname}: {e}")
 
 	# Commit the deletions
+	# Manual commit required: Uninstall hooks run outside normal transaction context
+	# and need explicit commits to persist changes before app removal
 	if deleted_count > 0:
-		frappe.db.commit()
+		frappe.db.commit()  # nosemgrep
 		print(f"Successfully deleted {deleted_count} custom field(s).")
 	else:
 		print("No custom fields found to delete.")

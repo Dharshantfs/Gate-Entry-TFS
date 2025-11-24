@@ -148,7 +148,9 @@ def create_gate_pass_from_stock_entry(stock_entry_name: str, enqueued_by: str | 
 			gate_pass.populate_gate_pass_items(gate_pass.get_stock_entry_items(stock_entry))
 			gate_pass.save(ignore_permissions=True)
 
-			frappe.db.commit()
+			# Manual commit required: This function runs in background queue (enqueued)
+			# and needs explicit commit to persist gate pass updates before returning
+			frappe.db.commit()  # nosemgrep
 			return
 
 	existing_gate_passes = frappe.get_all(
@@ -181,7 +183,9 @@ def create_gate_pass_from_stock_entry(stock_entry_name: str, enqueued_by: str | 
 	gate_pass.populate_gate_pass_items(gate_pass.get_stock_entry_items(stock_entry))
 	gate_pass.insert(ignore_permissions=True)
 
-	frappe.db.commit()
+	# Manual commit required: This function runs in background queue (enqueued)
+	# and needs explicit commit to persist newly created gate pass before returning
+	frappe.db.commit()  # nosemgrep
 
 
 def cancel_gate_passes_for_stock_entry(stock_entry):
