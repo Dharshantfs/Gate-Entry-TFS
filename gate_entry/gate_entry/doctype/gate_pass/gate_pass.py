@@ -786,27 +786,28 @@ class GatePass(Document):
 		# This allows Gate Pass to be cancelled independently
 		self.clear_stock_entry_reference()
 
-		# For manual return flow gate passes without a return Stock Entry,
-		# clear outbound_material_transfer and reference_number to allow cancellation
-		if (
-			cint(self.manual_return_flow) == 1
-			and self.entry_type == "Gate In"
-			and not self.return_material_transfer
-			and self.document_reference == "Stock Entry"
-		):
-			# Clear references to allow cancellation
-			self.outbound_material_transfer = None
-			self.reference_number = None
-
 		# Check for linked receipts (Purchase Receipt, Subcontracting Receipt)
 		# Stock Entry is handled differently - we allow cancellation
 		self.check_linked_receipts_before_cancel()
 
 	def on_cancel(self):
 		"""
-		Actions after cancellation - reference is already cleared in before_cancel
+		Actions after successful cancellation.
+		Clear references that were needed for cancellation validation.
 		"""
-		pass
+		# For manual return flow gate passes without a return Stock Entry,
+		# clear outbound_material_transfer and reference_number after successful cancellation.
+		# This must happen in on_cancel (not before_cancel) to prevent data loss
+		# if cancellation fails due to validation errors.
+		if (
+			cint(self.manual_return_flow) == 1
+			and self.entry_type == "Gate In"
+			and not self.return_material_transfer
+			and self.document_reference == "Stock Entry"
+		):
+			# Clear references after successful cancellation
+			self.outbound_material_transfer = None
+			self.reference_number = None
 
 	def check_receipts_in_amended_document(self):
 		"""
