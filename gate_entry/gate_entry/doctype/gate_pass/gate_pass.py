@@ -4,6 +4,8 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
+from frappe.query_builder import DocType
+from frappe.query_builder.functions import Sum
 from frappe.utils import cint, cstr, flt, nowdate, nowtime
 
 from gate_entry.constants import (
@@ -600,34 +602,47 @@ class GatePass(Document):
 				)
 
 	def get_existing_stock_entry_allocations(self, stock_entry_name, entry_type):
+		"""
+		Get existing stock entry allocations with database-level locking to prevent race conditions.
+
+		Uses SELECT FOR UPDATE to lock rows during query, ensuring concurrent transactions
+		wait for each other and preventing over-allocation when multiple gate passes are
+		validated simultaneously for the same stock entry.
+		"""
 		column = "dispatched_qty" if entry_type == "Gate Out" else "received_qty"
 
-		filters = [
-			["document_reference", "=", "Stock Entry"],
-			["docstatus", "<", 2],
-		]
-		if self.name:
-			filters.append(["name", "!=", self.name])
+		# Use frappe.qb with for_update() to lock rows and prevent race conditions
+		gate_pass = DocType("Gate Pass")
 
-		gate_pass_names = frappe.get_all(
-			"Gate Pass",
-			filters=filters,
-			or_filters=[
-				["Gate Pass", "reference_number", "=", stock_entry_name],
-				["Gate Pass", "outbound_material_transfer", "=", stock_entry_name],
-			],
-			pluck="name",
+		query = (
+			frappe.qb.from_(gate_pass)
+			.select(gate_pass.name)
+			.where(gate_pass.document_reference == "Stock Entry")
+			.where(gate_pass.docstatus < 2)
+			.where(
+				(gate_pass.reference_number == stock_entry_name)
+				| (gate_pass.outbound_material_transfer == stock_entry_name)
+			)
 		)
+
+		# Exclude current document if it exists
+		if self.name:
+			query = query.where(gate_pass.name != self.name)
+
+		# Lock rows with FOR UPDATE to prevent concurrent reads
+		gate_pass_names = query.for_update().run(pluck=True)
 
 		if not gate_pass_names:
 			return {}
 
-		records = frappe.db.get_all(
-			"Gate Pass Table",
-			filters={"parent": ["in", gate_pass_names]},
-			fields=["order_item_name", f"sum({column}) as total"],
-			group_by="order_item_name",
-		)
+		# Query child table - parent rows are already locked, ensuring consistency
+		gate_pass_table = DocType("Gate Pass Table")
+		records = (
+			frappe.qb.from_(gate_pass_table)
+			.select(gate_pass_table.order_item_name, Sum(gate_pass_table[column]).as_("total"))
+			.where(gate_pass_table.parent.isin(gate_pass_names))
+			.groupby(gate_pass_table.order_item_name)
+		).run(as_dict=True)
 
 		return {row.order_item_name: flt(row.total or 0) for row in records}
 
@@ -765,6 +780,27 @@ class GatePass(Document):
 		doc = reference_doc or self.get_reference_doc()
 		if hasattr(doc, "supplier") and doc.supplier != self.supplier:
 			frappe.throw(_("Supplier does not match the reference document"))
+
+	def before_submit(self):
+		"""
+		Validation before submission
+		"""
+		# For inbound gate passes (non-outbound), ensure at least one item has positive received_qty
+		# This applies even for manual return flows - zero quantities are allowed during draft,
+		# but at least one positive quantity is required on submission
+		if not self.is_outbound_reference():
+			has_positive_receipt = False
+			for item in self.gate_pass_table:
+				if flt(item.received_qty) > 0:
+					has_positive_receipt = True
+					break
+
+			if not has_positive_receipt:
+				frappe.throw(
+					_(
+						"Please enter a received quantity greater than zero for at least one item before submitting."
+					)
+				)
 
 	def on_submit(self):
 		"""
