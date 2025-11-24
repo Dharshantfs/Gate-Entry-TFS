@@ -31,6 +31,88 @@ def get_linked_return_transfer(stock_entry):
 	return getattr(stock_entry, "ge_linked_return_transfer", None)
 
 
+@frappe.whitelist()
+def get_outbound_transfer_reference(stock_entry_name):
+	"""
+	Get the outbound transfer reference for a return Stock Entry.
+	Checks doc_references table first, then falls back to return_against field.
+
+	Args:
+		stock_entry_name: Name of the Stock Entry
+
+	Returns:
+		Name of the outbound Stock Entry if this is a return entry, None otherwise
+	"""
+	if not stock_entry_name:
+		return None
+
+	try:
+		stock_entry = frappe.get_doc("Stock Entry", stock_entry_name)
+
+		# First check doc_references table for Stock Entry references
+		if hasattr(stock_entry, "doc_references") and stock_entry.doc_references:
+			for ref in stock_entry.doc_references:
+				if ref.link_doctype == "Stock Entry" and ref.link_name:
+					return ref.link_name
+
+		# Fall back to return_against field if doc_references doesn't have it
+		return get_original_outbound_transfer(stock_entry)
+	except frappe.DoesNotExistError:
+		return None
+
+
+@frappe.whitelist()
+def get_gate_pass_status(stock_entry_name):
+	"""
+	Get the Gate Pass status for a Stock Entry.
+
+	Args:
+		stock_entry_name: Name of the Stock Entry
+
+	Returns:
+		Dict with 'exists' (bool), 'name' (str or None), and 'docstatus' (int or None)
+	"""
+	if not stock_entry_name:
+		return {"exists": False, "name": None, "docstatus": None}
+
+	try:
+		stock_entry = frappe.get_doc("Stock Entry", stock_entry_name)
+
+		# Check gate_pass field first
+		gate_pass_name = getattr(stock_entry, "gate_pass", None)
+
+		# For return entries, also check return_material_transfer field
+		if not gate_pass_name and is_return_entry(stock_entry):
+			gate_passes = frappe.get_all(
+				"Gate Pass",
+				filters={
+					"document_reference": "Stock Entry",
+					"return_material_transfer": stock_entry_name,
+				},
+				fields=["name", "docstatus"],
+				limit=1,
+			)
+			if gate_passes:
+				gate_pass_name = gate_passes[0].name
+				docstatus = gate_passes[0].docstatus
+			else:
+				return {"exists": False, "name": None, "docstatus": None}
+		else:
+			# Get docstatus if gate_pass field exists
+			if gate_pass_name:
+				docstatus = frappe.db.get_value("Gate Pass", gate_pass_name, "docstatus")
+			else:
+				return {"exists": False, "name": None, "docstatus": None}
+
+		return {
+			"exists": True,
+			"name": gate_pass_name,
+			"docstatus": docstatus,
+		}
+	except frappe.DoesNotExistError:
+		return {"exists": False, "name": None, "docstatus": None}
+
+
 def create_gate_pass_from_stock_entry(stock_entry_name: str, enqueued_by: str | None = None):
 	stock_entry = frappe.get_doc("Stock Entry", stock_entry_name)
 

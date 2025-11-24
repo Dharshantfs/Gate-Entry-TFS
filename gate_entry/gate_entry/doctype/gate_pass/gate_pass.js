@@ -299,12 +299,8 @@ function create_subcontracting_receipt(frm) {
  * Setup Stock Entry creation button for inbound gate passes
  */
 function setup_stock_entry_button(frm) {
-	// Only show for inbound gate passes with outbound material transfer reference
-	if (
-		frm.doc.document_reference === STOCK_ENTRY_REFERENCE &&
-		frm.doc.entry_type === "Gate In" &&
-		frm.doc.outbound_material_transfer
-	) {
+	// Only show for inbound gate passes with Stock Entry reference
+	if (frm.doc.document_reference === STOCK_ENTRY_REFERENCE && frm.doc.entry_type === "Gate In") {
 		// Check if return_material_transfer exists and is valid
 		// If the field is set, verify the document exists in the local cache
 		// This handles cases where a draft Stock Entry was deleted
@@ -316,9 +312,12 @@ function setup_stock_entry_button(frm) {
 			// Show "Create Stock Entry" button if:
 			// 1. return_material_transfer is not set, OR
 			// 2. return_material_transfer is set but the document doesn't exist (was deleted)
-			frm.add_custom_button(__("Create Stock Entry"), function () {
-				create_stock_entry_from_gate_pass(frm);
-			}).addClass("btn-primary");
+			// But only if outbound_material_transfer exists (required to create return Stock Entry)
+			if (frm.doc.outbound_material_transfer) {
+				frm.add_custom_button(__("Create Stock Entry"), function () {
+					create_stock_entry_from_gate_pass(frm);
+				}).addClass("btn-primary");
+			}
 		} else {
 			// Show link to created Stock Entry if it exists
 			frm.add_custom_button(__("View Stock Entry"), function () {

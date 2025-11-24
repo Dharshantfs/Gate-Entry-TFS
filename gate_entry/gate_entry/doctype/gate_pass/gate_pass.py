@@ -786,6 +786,18 @@ class GatePass(Document):
 		# This allows Gate Pass to be cancelled independently
 		self.clear_stock_entry_reference()
 
+		# For manual return flow gate passes without a return Stock Entry,
+		# clear outbound_material_transfer and reference_number to allow cancellation
+		if (
+			cint(self.manual_return_flow) == 1
+			and self.entry_type == "Gate In"
+			and not self.return_material_transfer
+			and self.document_reference == "Stock Entry"
+		):
+			# Clear references to allow cancellation
+			self.outbound_material_transfer = None
+			self.reference_number = None
+
 		# Check for linked receipts (Purchase Receipt, Subcontracting Receipt)
 		# Stock Entry is handled differently - we allow cancellation
 		self.check_linked_receipts_before_cancel()
@@ -1945,7 +1957,10 @@ def create_stock_entry_from_inbound_gate_pass(gate_pass_name):
 	# Update Gate Pass with return Stock Entry reference
 	gate_pass.return_material_transfer = stock_entry.name
 	gate_pass.stock_entry = stock_entry.name
-	gate_pass.reference_number = stock_entry.name
+	# For manual return flows, preserve reference_number pointing to original outbound Stock Entry
+	# For non-manual flows, update reference_number to the newly created return Stock Entry
+	if not cint(gate_pass.manual_return_flow):
+		gate_pass.reference_number = stock_entry.name
 	gate_pass.save(ignore_permissions=True)
 
 	return stock_entry.name
