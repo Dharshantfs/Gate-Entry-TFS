@@ -1,5 +1,11 @@
 // Copyright (c) 2025, Gurudatt Kulkarni and contributors
 // For license information, please see license.txt
+const STOCK_ENTRY_REFERENCE = "Stock Entry";
+const INBOUND_REFERENCES = ["Purchase Order", "Subcontracting Order"];
+const OUTBOUND_REFERENCES = ["Sales Invoice", "Delivery Note"];
+const DOCUMENT_REFERENCES = [
+	...new Set([...INBOUND_REFERENCES, ...OUTBOUND_REFERENCES, STOCK_ENTRY_REFERENCE]),
+];
 
 frappe.ui.form.on("Gate Pass", {
 	onload_post_render(frm) {
@@ -41,24 +47,44 @@ frappe.ui.form.on("Gate Pass", {
 		// Hide the gate_pass_table field (it's for backend only)
 		frm.toggle_display("gate_pass_table", false);
 
-		// Show "Create Receipt" buttons after submission
+		frm.set_query("outbound_material_transfer", () => ({
+			filters: {
+				docstatus: 1,
+				stock_entry_type: ["in", ["Material Transfer", "Send to Subcontractor"]],
+				ge_external_transfer: 1,
+			},
+		}));
+
+		frm.set_query("return_material_transfer", () => ({
+			filters: {
+				docstatus: 1,
+				stock_entry_type: ["in", ["Material Transfer"]],
+				is_return: 1,
+			},
+		}));
+
+		frm.set_query("stock_entry_reference", () => ({
+			filters: {
+				docstatus: 1,
+				name: frm.doc.reference_number || undefined,
+			},
+		}));
+
+		toggle_stock_entry_link_permissions(frm);
+		toggle_discrepancy_fields(frm);
+		show_stock_entry_guidance(frm);
+
+		// Show "Create Receipt" and "Create Stock Entry" buttons after submission
 		if (frm.doc.docstatus === 1) {
 			setup_receipt_buttons(frm);
+			setup_stock_entry_button(frm);
 		}
 
 		// Filter Document Reference to show only relevant doctypes
 		frm.set_query("document_reference", function () {
 			return {
 				filters: {
-					name: [
-						"in",
-						[
-							"Purchase Order",
-							"Subcontracting Order",
-							"Sales Invoice",
-							"Delivery Note",
-						],
-					],
+					name: ["in", DOCUMENT_REFERENCES],
 				},
 			};
 		});
@@ -80,15 +106,7 @@ frappe.ui.form.on("Gate Pass", {
 		frm.set_query("document_reference", function () {
 			return {
 				filters: {
-					name: [
-						"in",
-						[
-							"Purchase Order",
-							"Subcontracting Order",
-							"Sales Invoice",
-							"Delivery Note",
-						],
-					],
+					name: ["in", DOCUMENT_REFERENCES],
 				},
 			};
 		});
@@ -111,7 +129,11 @@ frappe.ui.form.on("Gate Pass", {
 		}
 
 		// Update entry type locally for better UX
-		if (is_outbound_reference(frm.doc.document_reference)) {
+		if (frm.doc.document_reference === STOCK_ENTRY_REFERENCE) {
+			frm.set_value("entry_type", "Gate Out");
+			frm.set_value("supplier", null);
+			frm.set_value("supplier_delivery_note", null);
+		} else if (is_outbound_reference(frm.doc.document_reference, "Gate Out")) {
 			frm.set_value("entry_type", "Gate Out");
 			frm.set_value("supplier", null);
 			frm.set_value("supplier_delivery_note", null);
@@ -122,6 +144,16 @@ frappe.ui.form.on("Gate Pass", {
 		// Clear items when document type changes
 		frm.clear_table("gate_pass_table");
 		frm.refresh_field("gate_pass_table");
+
+		frm.set_value("outbound_material_transfer", null);
+		frm.set_value("return_material_transfer", null);
+		frm.set_value("has_discrepancy", 0);
+		frm.set_value("lost_quantity", 0);
+		frm.set_value("damaged_quantity", 0);
+		frm.set_value("discrepancy_notes", null);
+
+		toggle_stock_entry_link_permissions(frm);
+		toggle_discrepancy_fields(frm);
 
 		clear_compliance_status(frm);
 
@@ -136,7 +168,10 @@ frappe.ui.form.on("Gate Pass", {
 		if (frm.doc.document_reference && frm.doc.reference_number) {
 			load_reference_details(frm);
 
-			if (is_outbound_reference(frm.doc.document_reference)) {
+			if (frm.doc.document_reference === STOCK_ENTRY_REFERENCE) {
+				load_reference_items(frm);
+				clear_compliance_status(frm);
+			} else if (is_outbound_reference(frm.doc.document_reference, frm.doc.entry_type)) {
 				load_reference_items(frm);
 				refresh_compliance_status(frm);
 			} else {
@@ -150,6 +185,25 @@ frappe.ui.form.on("Gate Pass", {
 		if (frm.gate_pass_ui) {
 			frm.gate_pass_ui.refresh();
 		}
+	},
+
+	has_discrepancy(frm) {
+		toggle_discrepancy_fields(frm);
+	},
+
+	manual_return_flow(frm) {
+		if (frm.doc.manual_return_flow) {
+			frm.set_value("entry_type", "Gate In");
+			show_stock_entry_guidance(frm);
+		} else {
+			frm.trigger("document_reference");
+			show_stock_entry_guidance(frm);
+		}
+	},
+
+	stock_entry_reference(frm) {
+		// keep guidance in sync
+		show_stock_entry_guidance(frm);
 	},
 });
 
@@ -241,6 +295,69 @@ function create_subcontracting_receipt(frm) {
 	});
 }
 
+/**
+ * Setup Stock Entry creation button for inbound gate passes
+ */
+function setup_stock_entry_button(frm) {
+	// Only show for inbound gate passes with Stock Entry reference
+	if (frm.doc.document_reference === STOCK_ENTRY_REFERENCE && frm.doc.entry_type === "Gate In") {
+		// Check if return_material_transfer exists and is valid
+		// If the field is set, verify the document exists in the local cache
+		// This handles cases where a draft Stock Entry was deleted
+		const return_transfer = frm.doc.return_material_transfer;
+		const has_valid_return_transfer =
+			return_transfer && frappe.model.exists("Stock Entry", return_transfer);
+
+		if (!has_valid_return_transfer) {
+			// Show "Create Stock Entry" button if:
+			// 1. return_material_transfer is not set, OR
+			// 2. return_material_transfer is set but the document doesn't exist (was deleted)
+			// But only if outbound_material_transfer exists (required to create return Stock Entry)
+			if (frm.doc.outbound_material_transfer) {
+				frm.add_custom_button(__("Create Stock Entry"), function () {
+					create_stock_entry_from_gate_pass(frm);
+				}).addClass("btn-primary");
+			}
+		} else {
+			// Show link to created Stock Entry if it exists
+			frm.add_custom_button(__("View Stock Entry"), function () {
+				frappe.set_route("Form", "Stock Entry", return_transfer);
+			});
+		}
+	}
+}
+
+/**
+ * Create Stock Entry from inbound Gate Pass
+ */
+function create_stock_entry_from_gate_pass(frm) {
+	frappe.confirm(
+		__("Create a return Material Transfer Stock Entry from this inbound Gate Pass?"),
+		function () {
+			frappe.call({
+				method: "gate_entry.gate_entry.doctype.gate_pass.gate_pass.create_stock_entry_from_inbound_gate_pass",
+				args: {
+					gate_pass_name: frm.doc.name,
+				},
+				freeze: true,
+				freeze_message: __("Creating Stock Entry..."),
+				callback: function (r) {
+					if (r.message) {
+						frappe.show_alert({
+							message: __("Stock Entry {0} created successfully", [r.message]),
+							indicator: "green",
+						});
+						// Reload the form to show the updated return_material_transfer field
+						frm.reload_doc();
+						// Redirect to the new Stock Entry
+						frappe.set_route("Form", "Stock Entry", r.message);
+					}
+				},
+			});
+		}
+	);
+}
+
 function load_reference_details(frm) {
 	frappe.call({
 		method: "gate_entry.gate_entry.doctype.gate_pass.gate_pass.get_reference_details",
@@ -279,7 +396,7 @@ function load_reference_details(frm) {
 			if (details.driver_contact && !frm.doc.driver_contact) {
 				updates.driver_contact = details.driver_contact;
 			}
-			if (is_outbound_reference(frm.doc.document_reference)) {
+			if (is_outbound_reference(frm.doc.document_reference, frm.doc.entry_type)) {
 				updates.supplier = null;
 				updates.supplier_delivery_note = null;
 			} else if (details.party_type === "Supplier" && details.party) {
@@ -314,7 +431,9 @@ function load_reference_items(frm) {
 
 function set_gate_pass_items(frm, items) {
 	frm.clear_table("gate_pass_table");
-
+	// fetch the value of manual_return_flow
+	const is_return_flow = parseInt(frm.doc.manual_return_flow || 0) === 1;
+	console.log("Is return flow: ", is_return_flow);
 	(items || []).forEach((item) => {
 		const row = frm.add_child("gate_pass_table");
 		row.item_code = item.item_code;
@@ -324,12 +443,15 @@ function set_gate_pass_items(frm, items) {
 		row.stock_uom = item.stock_uom || "";
 		row.conversion_factor = item.conversion_factor || 1.0;
 		row.ordered_qty = item.ordered_qty || 0;
-		row.received_qty = item.received_qty || 0;
+		row.received_qty = is_return_flow ? item.received_qty : 0;
 		row.dispatched_qty = item.dispatched_qty || 0;
 		row.pending_qty = item.pending_qty || 0;
 		row.is_rate_contract = item.is_rate_contract || 0;
 		row.rate = item.rate || 0;
-		const qty_for_amount = is_outbound_reference(frm.doc.document_reference)
+		const qty_for_amount = is_outbound_reference(
+			frm.doc.document_reference,
+			frm.doc.entry_type
+		)
 			? item.dispatched_qty || 0
 			: item.received_qty || 0;
 		row.amount = qty_for_amount * (item.rate || 0);
@@ -351,8 +473,41 @@ function set_gate_pass_items(frm, items) {
 	}
 }
 
-function is_outbound_reference(documentReference) {
-	return ["Sales Invoice", "Delivery Note"].includes(documentReference);
+function toggle_discrepancy_fields(frm) {
+	console.log(frm.doc.has_discrepancy);
+
+	const show = frm.doc.has_discrepancy;
+	const can_edit =
+		(frm.perm && frm.perm[0] && frm.perm[0].write) ||
+		frappe.perm.has_perm("Gate Pass", 0, "write");
+
+	const fields = ["has_discrepancy", "lost_quantity", "damaged_quantity", "discrepancy_notes"];
+	fields.forEach((fieldname) => {
+		const read_only = !can_edit || frm.doc.docstatus > 0;
+		frm.set_df_property(fieldname, "read_only", read_only);
+	});
+
+	frm.toggle_reqd("lost_quantity", show);
+	frm.toggle_reqd("damaged_quantity", show);
+}
+
+function is_outbound_reference(documentReference, entryType) {
+	if (documentReference === STOCK_ENTRY_REFERENCE) {
+		return (entryType || "Gate Out") === "Gate Out";
+	}
+	return OUTBOUND_REFERENCES.includes(documentReference);
+}
+
+function toggle_stock_entry_link_permissions(frm) {
+	const can_edit =
+		(frm.perm && frm.perm[0] && frm.perm[0].write) ||
+		frappe.perm.has_perm("Gate Pass", 0, "write");
+	const read_only = !can_edit || frm.doc.docstatus > 0;
+
+	["outbound_material_transfer", "return_material_transfer"].forEach((field) => {
+		frm.set_df_property(field, "read_only", read_only);
+	});
+	frm.set_df_property("manual_return_flow", "read_only", read_only);
 }
 
 function refresh_compliance_status(frm) {
@@ -364,7 +519,7 @@ function refresh_compliance_status(frm) {
 	if (
 		!frm.doc.document_reference ||
 		!frm.doc.reference_number ||
-		!is_outbound_reference(frm.doc.document_reference)
+		!is_outbound_reference(frm.doc.document_reference, frm.doc.entry_type)
 	) {
 		clear_compliance_status(frm);
 		return;
@@ -452,4 +607,26 @@ function set_compliance_status(field, status) {
 	`;
 
 	wrapper.html(html);
+}
+
+function show_stock_entry_guidance(frm) {
+	if (frm.doc.document_reference !== STOCK_ENTRY_REFERENCE) {
+		return;
+	}
+
+	frm.dashboard.clear_comment();
+
+	if (frm.doc.manual_return_flow) {
+		frm.dashboard.add_comment(
+			__(
+				"Material is returning before a Stock Entry is recorded. Select the outbound transfer in the section below so quantities can be validated."
+			),
+			"yellow"
+		);
+	} else if (frm.doc.entry_type === "Gate In" && !frm.doc.reference_number) {
+		frm.dashboard.add_comment(
+			__("Select the Stock Entry return document to link this Gate Pass."),
+			"orange"
+		);
+	}
 }

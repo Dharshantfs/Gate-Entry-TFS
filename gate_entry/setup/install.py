@@ -4,6 +4,7 @@
 import frappe
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
+from gate_entry.setup.custom_fields import get_custom_fields
 from gate_entry.setup.permissions import ensure_security_guard_permissions
 
 REPORTS = (
@@ -20,7 +21,7 @@ def after_install():
 	Custom fields will be created when setup_custom_fields is run manually.
 	"""
 	try:
-		create_gate_pass_custom_fields()
+		create_gate_entry_custom_fields()
 	except Exception as e:
 		# Log error but don't fail installation if ERPNext doctypes don't exist yet
 		frappe.log_error(
@@ -36,6 +37,7 @@ def after_install():
 
 	ensure_reports()
 	ensure_security_guard_permissions()
+	reload_gate_pass_doctype()
 
 
 def after_migrate():
@@ -43,50 +45,29 @@ def after_migrate():
 
 	ensure_reports()
 	ensure_security_guard_permissions()
+	reload_gate_pass_doctype()
 
 
-def create_gate_pass_custom_fields():
+def create_gate_entry_custom_fields():
 	"""
-	Create custom fields in Purchase Receipt and Subcontracting Receipt
-	to link back to Gate Pass
-
-	Note: Gate Pass is added to ignore_links_on_delete in hooks.py,
-	which allows Purchase Receipts and Subcontracting Receipts to be deleted
-	even when linked to Gate Pass.
+	Create custom fields in dependent ERPNext doctypes without touching core.
 	"""
-	custom_fields = {
-		"Purchase Receipt": [
-			{
-				"fieldname": "gate_pass",
-				"label": "Gate Pass",
-				"fieldtype": "Link",
-				"options": "Gate Pass",
-				"insert_after": "supplier_delivery_note",
-				"read_only": 1,
-				"no_copy": 1,
-				"print_hide": 1,
-				"translatable": 0,
-			}
-		],
-		"Subcontracting Receipt": [
-			{
-				"fieldname": "gate_pass",
-				"label": "Gate Pass",
-				"fieldtype": "Link",
-				"options": "Gate Pass",
-				"insert_after": "supplier_delivery_note",
-				"read_only": 1,
-				"no_copy": 1,
-				"print_hide": 1,
-				"translatable": 0,
-			}
-		],
-	}
-
+	custom_fields = get_custom_fields()
 	create_custom_fields(custom_fields, update=True)
 	# Manual commit in installation script to ensure fields are saved
 	# nosemgrep
 	frappe.db.commit()
+
+
+def reload_gate_pass_doctype():
+	"""Reload Gate Pass DocType so new metadata (e.g. Stock Entry links) is available."""
+	try:
+		frappe.reload_doc("gate_entry", "doctype", "gate_pass")
+	except Exception as exc:
+		frappe.log_error(
+			message=f"Failed to reload Gate Pass DocType: {exc}",
+			title="Gate Entry Gate Pass Reload",
+		)
 
 
 def ensure_reports():

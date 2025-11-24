@@ -10,15 +10,14 @@ import frappe
 from frappe import _
 from frappe.utils import flt
 
-INBOUND_REFERENCES = {"Purchase Order", "Subcontracting Order"}
-OUTBOUND_REFERENCES = {"Sales Invoice", "Delivery Note"}
-SUPPORTED_DOCUMENT_REFERENCES = INBOUND_REFERENCES | OUTBOUND_REFERENCES
-REFERENCE_PARTY_FIELDS = {
-	"Purchase Order": ("supplier", "supplier_name"),
-	"Subcontracting Order": ("supplier", "supplier_name"),
-	"Sales Invoice": ("customer", "customer_name"),
-	"Delivery Note": ("customer", "customer_name"),
-}
+from gate_entry.constants import (
+	ALL_REFERENCES,
+	INBOUND_REFERENCES,
+	OUTBOUND_REFERENCES,
+	REFERENCE_PARTY_FIELDS,
+)
+
+SUPPORTED_DOCUMENT_REFERENCES = ALL_REFERENCES
 
 
 class Key(NamedTuple):

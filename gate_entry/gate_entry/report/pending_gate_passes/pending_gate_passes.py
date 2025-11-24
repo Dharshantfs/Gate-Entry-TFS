@@ -9,24 +9,13 @@ import frappe
 from frappe import _
 from frappe.utils import cint, cstr, date_diff, flt, getdate, nowdate
 
-from gate_entry.gate_entry.doctype.gate_pass.gate_pass import get_gst_settings, is_generated_status
-
-INBOUND_REFERENCES = {"Purchase Order", "Subcontracting Order"}
-OUTBOUND_REFERENCES = {"Sales Invoice", "Delivery Note"}
-REFERENCE_PARTY_FIELDS = {
-	"Purchase Order": ("supplier", "supplier_name"),
-	"Subcontracting Order": ("supplier", "supplier_name"),
-	"Sales Invoice": ("customer", "customer_name"),
-	"Delivery Note": ("customer", "customer_name"),
-}
-REFERENCE_TOTAL_FIELDS = (
-	"rounded_total",
-	"grand_total",
-	"base_grand_total",
-	"net_total",
-	"total",
-	"base_total",
+from gate_entry.constants import (
+	INBOUND_REFERENCES,
+	OUTBOUND_REFERENCES,
+	REFERENCE_PARTY_FIELDS,
+	REFERENCE_TOTAL_FIELDS,
 )
+from gate_entry.gate_entry.doctype.gate_pass.gate_pass import get_gst_settings, is_generated_status
 
 
 def execute(filters: dict | None = None):

@@ -2,72 +2,36 @@
 # For license information, please see license.txt
 
 """
-Script to add Gate Pass custom fields to Purchase Receipt and Subcontracting Receipt
+Provision Gate Entry custom fields on ERPNext doctypes.
 
 Run this script using:
-bench execute gate_entry.setup.setup_custom_fields.setup
+    bench execute gate_entry.setup.setup_custom_fields.setup
 """
 
 import frappe
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
+from gate_entry.setup.custom_fields import get_custom_fields
+
 
 def setup():
 	"""
-	Main function to setup custom fields
+	Main entry point when executed via bench execute.
 	"""
-	create_gate_pass_custom_fields()
-	print("Gate Pass custom fields created successfully!")
+	create_gate_entry_custom_fields()
+	print("Gate Entry custom fields created/updated successfully!")
 
 
-def create_gate_pass_custom_fields():
+def create_gate_entry_custom_fields():
 	"""
-	Create custom fields in Purchase Receipt and Subcontracting Receipt
-	to link back to Gate Pass
-
-	Note: Gate Pass is added to ignore_links_on_delete in hooks.py,
-	which allows Purchase Receipts and Subcontracting Receipts to be deleted
-	even when linked to Gate Pass.
+	Create or update custom fields across dependent ERPNext doctypes.
 	"""
-	custom_fields = {
-		"Purchase Receipt": [
-			{
-				"fieldname": "gate_pass",
-				"label": "Gate Pass",
-				"fieldtype": "Link",
-				"options": "Gate Pass",
-				"insert_after": "supplier_delivery_note",
-				"read_only": 1,
-				"no_copy": 1,
-				"print_hide": 1,
-				"translatable": 0,
-				"search_index": 1,
-			}
-		],
-		"Subcontracting Receipt": [
-			{
-				"fieldname": "gate_pass",
-				"label": "Gate Pass",
-				"fieldtype": "Link",
-				"options": "Gate Pass",
-				"insert_after": "supplier_delivery_note",
-				"read_only": 1,
-				"no_copy": 1,
-				"print_hide": 1,
-				"translatable": 0,
-				"search_index": 1,
-			}
-		],
-	}
-
+	custom_fields = get_custom_fields()
 	create_custom_fields(custom_fields, update=True)
-	# Manual commit in standalone script executed via bench execute
+
+	# Manual commit when executed via bench execute / during install.
 	# nosemgrep
 	frappe.db.commit()
-
-	print("Custom fields created:")
-	print("  - Purchase Receipt: gate_pass field")
-	print("  - Subcontracting Receipt: gate_pass field")
 
 
 if __name__ == "__main__":

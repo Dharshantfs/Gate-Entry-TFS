@@ -8,14 +8,7 @@ from collections.abc import Iterable
 import frappe
 from frappe import _
 
-INBOUND_REFERENCES = {"Purchase Order", "Subcontracting Order"}
-OUTBOUND_REFERENCES = {"Sales Invoice", "Delivery Note"}
-REFERENCE_PARTY_FIELDS = {
-	"Purchase Order": ("supplier", "supplier_name"),
-	"Subcontracting Order": ("supplier", "supplier_name"),
-	"Sales Invoice": ("customer", "customer_name"),
-	"Delivery Note": ("customer", "customer_name"),
-}
+from gate_entry.constants import INBOUND_REFERENCES, OUTBOUND_REFERENCES, REFERENCE_PARTY_FIELDS
 
 
 def execute(filters: dict | None = None):

@@ -1,11 +1,12 @@
 # Gate Pass Custom Fields Setup
 
-This module adds custom fields to Purchase Receipt and Subcontracting Receipt to enable bidirectional linking with Gate Pass.
+This module adds custom fields to ERPNext doctypes so that gate operations can track upstream documents without modifying ERPNext core.
 
 ## What It Does
 
 - Adds a `gate_pass` field to **Purchase Receipt**
 - Adds a `gate_pass` field to **Subcontracting Receipt**
+- Adds an `External Transfer` checkbox and optional instructions to **Stock Entry** for Material Transfer flows
 - Enables connections between Gate Pass and receipts to appear in the Connections sidebar
 
 ## Installation
@@ -65,6 +66,21 @@ bench restart
 - **Options**: Gate Pass
 - **Location**: After `supplier_delivery_note` field
 - **Read Only**: Yes
+
+# Stock Entry Customisations
+
+These fields control whether a Material Transfer should generate gate documentation and allow stores teams to pass notes to the gate.
+
+- **Field Name**: `ge_external_transfer`
+  - **Field Type**: Check
+  - **Label**: External Transfer
+  - **Visible When**: `stock_entry_type == "Material Transfer"`
+  - **Purpose**: Flag that the movement leaves the plant; auto-creation logic will create a draft Gate Pass when ticked.
+- **Field Name**: `ge_gate_pass_instruction`
+  - **Field Type**: Small Text
+  - **Label**: Gate Pass Instructions
+  - **Visible When**: `ge_external_transfer` is ticked
+  - **Purpose**: Optional notes for security (vehicle info placeholders, packaging remarks, etc.)
 
 ### Subcontracting Receipt
 - **Field Name**: `gate_pass`

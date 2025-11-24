@@ -44,7 +44,12 @@ app_include_css = "/assets/gate_entry/css/gate_pass.css"
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-doctype_js = {"Gate Pass": "public/js/gate_pass_custom_ui.js"}
+doctype_js = {
+	"Gate Pass": "public/js/gate_pass_custom_ui.js",
+	"Stock Entry": "public/js/stock_entry_external_transfer.js",
+}
+
+
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -90,8 +95,8 @@ after_migrate = "gate_entry.setup.install.after_migrate"
 # Uninstallation
 # ------------
 
-# before_uninstall = "gate_entry.uninstall.before_uninstall"
-# after_uninstall = "gate_entry.uninstall.after_uninstall"
+before_uninstall = "gate_entry.setup.uninstall.before_uninstall"
+after_uninstall = "gate_entry.setup.uninstall.after_uninstall"
 
 # Integration Setup
 # ------------------
@@ -139,7 +144,6 @@ after_migrate = "gate_entry.setup.install.after_migrate"
 # ---------------
 # Hook on document methods and events
 # These handlers clean up Gate Pass references when receipts are deleted/cancelled
-
 doc_events = {
 	"Purchase Receipt": {
 		"on_trash": "gate_entry.gate_entry.doctype.gate_pass.gate_pass.on_purchase_receipt_trash",
@@ -148,6 +152,11 @@ doc_events = {
 	"Subcontracting Receipt": {
 		"on_trash": "gate_entry.gate_entry.doctype.gate_pass.gate_pass.on_subcontracting_receipt_trash",
 		"on_cancel": "gate_entry.gate_entry.doctype.gate_pass.gate_pass.on_subcontracting_receipt_cancel",
+	},
+	"Stock Entry": {
+		"on_submit": "gate_entry.gate_entry.doctype.gate_pass.gate_pass.on_stock_entry_submit",
+		"on_trash": "gate_entry.gate_entry.doctype.gate_pass.gate_pass.on_stock_entry_trash",
+		"on_cancel": "gate_entry.gate_entry.doctype.gate_pass.gate_pass.on_stock_entry_cancel",
 	},
 }
 
@@ -208,12 +217,16 @@ document_links = {
 	"Gate Pass": [
 		{"link_doctype": "Purchase Receipt", "link_fieldname": "gate_pass"},
 		{"link_doctype": "Subcontracting Receipt", "link_fieldname": "gate_pass"},
+		{"link_doctype": "Stock Entry", "link_fieldname": "gate_pass"},
 	],
 	"Purchase Receipt": [
 		{"link_doctype": "Gate Pass", "link_fieldname": "purchase_receipt"},
 	],
 	"Subcontracting Receipt": [
 		{"link_doctype": "Gate Pass", "link_fieldname": "subcontracting_receipt"},
+	],
+	"Stock Entry": [
+		{"link_doctype": "Gate Pass", "link_fieldname": "stock_entry"},
 	],
 }
 
