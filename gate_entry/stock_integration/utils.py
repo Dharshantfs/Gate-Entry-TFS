@@ -59,7 +59,7 @@ def create_gate_pass_from_stock_entry(stock_entry_name: str, enqueued_by: str | 
 			gate_pass.reference_number = stock_entry.name
 			gate_pass.manual_return_flow = 0
 			gate_pass.return_material_transfer = stock_entry.name
-			gate_pass.stock_entry_reference = stock_entry.name
+			gate_pass.stock_entry = stock_entry.name
 			gate_pass.document_reference = "Stock Entry"
 			gate_pass.entry_type = "Gate In"
 
@@ -71,7 +71,7 @@ def create_gate_pass_from_stock_entry(stock_entry_name: str, enqueued_by: str | 
 
 	existing_gate_passes = frappe.get_all(
 		"Gate Pass",
-		filters={"reference_document": "Stock Entry", "reference_number": stock_entry.name},
+		filters={"document_reference": "Stock Entry", "reference_number": stock_entry.name},
 		pluck="name",
 	)
 
@@ -86,7 +86,7 @@ def create_gate_pass_from_stock_entry(stock_entry_name: str, enqueued_by: str | 
 	gate_pass.driver_name = ""
 	gate_pass.driver_contact = ""
 	gate_pass.entry_type = "Gate Out"
-	gate_pass.stock_entry_reference = stock_entry.name
+	gate_pass.stock_entry = stock_entry.name
 
 	if is_return:
 		gate_pass.entry_type = "Gate In"
@@ -118,4 +118,3 @@ def cancel_gate_passes_for_stock_entry(stock_entry):
 				gate_pass.delete()
 		except Exception:
 			frappe.log_error(title="Gate Pass cancellation failed", message=frappe.get_traceback())
-

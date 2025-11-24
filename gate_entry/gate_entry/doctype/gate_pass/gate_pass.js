@@ -444,7 +444,7 @@ function set_gate_pass_items(frm, items) {
 		row.stock_uom = item.stock_uom || "";
 		row.conversion_factor = item.conversion_factor || 1.0;
 		row.ordered_qty = item.ordered_qty || 0;
-		row.received_qty = is_return_flow ? item.dispatched_qty : 0;
+		row.received_qty = is_return_flow ? item.received_qty : 0;
 		row.dispatched_qty = item.dispatched_qty || 0;
 		row.pending_qty = item.pending_qty || 0;
 		row.is_rate_contract = item.is_rate_contract || 0;
