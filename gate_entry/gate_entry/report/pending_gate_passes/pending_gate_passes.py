@@ -179,9 +179,6 @@ def get_data(filters: frappe._dict) -> list[dict[str, object]]:
 		if filters.get("supplier") and row.entry_type == "Gate Out":
 			continue
 
-		if filters.get("stock_entry_type") and row.get("stock_entry_type") != filters.stock_entry_type:
-			continue
-
 		pending_date = resolve_pending_date(row)
 		aging = date_diff(today, pending_date)
 
@@ -274,6 +271,12 @@ def fetch_inbound_pending(
 		conditions.append("gp.document_reference = 'Stock Entry'")
 		values["stock_entry"] = filters.stock_entry
 
+	if filters.get("stock_entry_type"):
+		conditions.append(
+			"(gp.document_reference != 'Stock Entry' OR se.stock_entry_type = %(stock_entry_type)s)"
+		)
+		values["stock_entry_type"] = filters.stock_entry_type
+
 	# Exclude cancelled Stock Entries
 	conditions.append("(gp.document_reference != 'Stock Entry' OR IFNULL(se.docstatus, 0) != 2)")
 
@@ -355,6 +358,12 @@ def fetch_outbound_pending(
 		conditions.append("gp.reference_number = %(stock_entry)s")
 		conditions.append("gp.document_reference = 'Stock Entry'")
 		values["stock_entry"] = filters.stock_entry
+
+	if filters.get("stock_entry_type"):
+		conditions.append(
+			"(gp.document_reference != 'Stock Entry' OR se.stock_entry_type = %(stock_entry_type)s)"
+		)
+		values["stock_entry_type"] = filters.stock_entry_type
 
 	# Exclude cancelled Stock Entries
 	conditions.append("(gp.document_reference != 'Stock Entry' OR IFNULL(se.docstatus, 0) != 2)")

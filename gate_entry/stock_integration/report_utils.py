@@ -1,6 +1,7 @@
 import frappe
 from frappe.utils import flt
 
+
 def get_stock_entry_metadata(stock_entry_name):
 	"""
 	Fetch Stock Entry header data (type, posting_date, posting_time).
@@ -8,12 +9,16 @@ def get_stock_entry_metadata(stock_entry_name):
 	if not stock_entry_name:
 		return {}
 
-	return frappe.db.get_value(
-		"Stock Entry",
-		stock_entry_name,
-		["stock_entry_type", "posting_date", "posting_time", "docstatus"],
-		as_dict=True
-	) or {}
+	return (
+		frappe.db.get_value(
+			"Stock Entry",
+			stock_entry_name,
+			["stock_entry_type", "posting_date", "posting_time", "docstatus"],
+			as_dict=True,
+		)
+		or {}
+	)
+
 
 def get_stock_entry_warehouses(stock_entry_name):
 	"""
@@ -24,9 +29,7 @@ def get_stock_entry_warehouses(stock_entry_name):
 		return "", ""
 
 	items = frappe.get_all(
-		"Stock Entry Detail",
-		filters={"parent": stock_entry_name},
-		fields=["s_warehouse", "t_warehouse"]
+		"Stock Entry Detail", filters={"parent": stock_entry_name}, fields=["s_warehouse", "t_warehouse"]
 	)
 
 	source_warehouses = set()
@@ -40,6 +43,7 @@ def get_stock_entry_warehouses(stock_entry_name):
 
 	return ", ".join(sorted(source_warehouses)), ", ".join(sorted(target_warehouses))
 
+
 def get_stock_entry_item_details(stock_entry_name):
 	"""
 	Fetch item-level details (item_code, item_name, quantity, uom) from Stock Entry.
@@ -50,8 +54,9 @@ def get_stock_entry_item_details(stock_entry_name):
 	return frappe.get_all(
 		"Stock Entry Detail",
 		filters={"parent": stock_entry_name},
-		fields=["item_code", "item_name", "qty", "uom", "stock_uom", "transfer_qty"]
+		fields=["item_code", "item_name", "qty", "uom", "stock_uom", "transfer_qty"],
 	)
+
 
 def get_stock_entry_allocated_quantities(stock_entry_name):
 	"""
@@ -65,22 +70,13 @@ def get_stock_entry_allocated_quantities(stock_entry_name):
 	# Check both direct reference and return reference
 	gate_passes = frappe.get_all(
 		"Gate Pass",
-		filters={
-			"docstatus": 1,
-			"document_reference": "Stock Entry",
-			"reference_number": stock_entry_name
-		},
-		pluck="name"
+		filters={"docstatus": 1, "document_reference": "Stock Entry", "reference_number": stock_entry_name},
+		pluck="name",
 	)
 
 	# Also check outbound_material_transfer for return flows
 	return_gate_passes = frappe.get_all(
-		"Gate Pass",
-		filters={
-			"docstatus": 1,
-			"outbound_material_transfer": stock_entry_name
-		},
-		pluck="name"
+		"Gate Pass", filters={"docstatus": 1, "outbound_material_transfer": stock_entry_name}, pluck="name"
 	)
 
 	all_gate_passes = set(gate_passes + return_gate_passes)
@@ -94,7 +90,7 @@ def get_stock_entry_allocated_quantities(stock_entry_name):
 	gp_items = frappe.get_all(
 		"Gate Pass Table",
 		filters={"parent": ["in", list(all_gate_passes)]},
-		fields=["item_code", "received_qty", "dispatched_qty", "parent"]
+		fields=["item_code", "received_qty", "dispatched_qty", "parent"],
 	)
 
 	for item in gp_items:
@@ -110,6 +106,7 @@ def get_stock_entry_allocated_quantities(stock_entry_name):
 
 	return allocations
 
+
 def is_stock_entry_cancelled(stock_entry_name):
 	"""
 	Check if Stock Entry is cancelled (docstatus = 2).
@@ -119,4 +116,3 @@ def is_stock_entry_cancelled(stock_entry_name):
 
 	docstatus = frappe.db.get_value("Stock Entry", stock_entry_name, "docstatus")
 	return docstatus == 2
-
