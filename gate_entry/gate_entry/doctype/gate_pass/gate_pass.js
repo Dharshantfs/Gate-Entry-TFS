@@ -15,7 +15,7 @@ frappe.ui.form.on("Gate Pass", {
 		}
 	},
 
-	refresh(frm) {
+	async refresh(frm) {
 		// Initialize the custom UI component if not already done
 		if (!frm.gate_pass_ui && window.GatePassCustomUI) {
 			frm.gate_pass_ui = new window.GatePassCustomUI(frm);
@@ -77,7 +77,7 @@ frappe.ui.form.on("Gate Pass", {
 		// Show "Create Receipt" and "Create Stock Entry" buttons after submission
 		if (frm.doc.docstatus === 1) {
 			setup_receipt_buttons(frm);
-			setup_stock_entry_button(frm);
+			await setup_stock_entry_button(frm);
 		}
 
 		// Filter Document Reference to show only relevant doctypes
@@ -298,15 +298,23 @@ function create_subcontracting_receipt(frm) {
 /**
  * Setup Stock Entry creation button for inbound gate passes
  */
-function setup_stock_entry_button(frm) {
+async function setup_stock_entry_button(frm) {
 	// Only show for inbound gate passes with Stock Entry reference
 	if (frm.doc.document_reference === STOCK_ENTRY_REFERENCE && frm.doc.entry_type === "Gate In") {
 		// Check if return_material_transfer exists and is valid
-		// If the field is set, verify the document exists in the local cache
+		// If the field is set, verify the document exists in the database
 		// This handles cases where a draft Stock Entry was deleted
 		const return_transfer = frm.doc.return_material_transfer;
-		const has_valid_return_transfer =
-			return_transfer && frappe.model.exists("Stock Entry", return_transfer);
+		let has_valid_return_transfer = false;
+
+		if (return_transfer) {
+			try {
+				has_valid_return_transfer = await frappe.db.exists("Stock Entry", return_transfer);
+			} catch (e) {
+				// Document doesn't exist or error checking
+				has_valid_return_transfer = false;
+			}
+		}
 
 		if (!has_valid_return_transfer) {
 			// Show "Create Stock Entry" button if:
