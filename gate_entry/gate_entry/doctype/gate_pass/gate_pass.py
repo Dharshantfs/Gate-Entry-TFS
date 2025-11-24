@@ -806,8 +806,9 @@ class GatePass(Document):
 			and self.document_reference == "Stock Entry"
 		):
 			# Clear references after successful cancellation
-			self.outbound_material_transfer = None
-			self.reference_number = None
+			# Use db_set to directly update the database without triggering validations
+			self.db_set("outbound_material_transfer", None, update_modified=False)
+			self.db_set("reference_number", None, update_modified=False)
 
 	def check_receipts_in_amended_document(self):
 		"""
