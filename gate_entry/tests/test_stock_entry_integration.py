@@ -217,10 +217,13 @@ class TestStockEntryIntegration(FrappeTestCase):
 				return outbound_se
 			raise frappe.DoesNotExistError
 
-		with patch(
-			"gate_entry.gate_entry.doctype.gate_pass.gate_pass.frappe.get_cached_doc",
-			side_effect=fake_get_cached,
-		), patch("gate_entry.gate_entry.doctype.gate_pass.gate_pass.frappe.get_all") as get_all:
+		with (
+			patch(
+				"gate_entry.gate_entry.doctype.gate_pass.gate_pass.frappe.get_cached_doc",
+				side_effect=fake_get_cached,
+			),
+			patch("gate_entry.gate_entry.doctype.gate_pass.gate_pass.frappe.get_all") as get_all,
+		):
 			get_all.return_value = []
 
 			gate_pass.before_validate()
@@ -332,10 +335,13 @@ class TestStockEntryIntegration(FrappeTestCase):
 					return outbound_se
 			raise frappe.DoesNotExistError
 
-		with patch(
-			"gate_entry.gate_entry.doctype.gate_pass.gate_pass.frappe.get_cached_doc",
-			side_effect=fake_get_cached,
-		), patch("gate_entry.gate_entry.doctype.gate_pass.gate_pass.frappe.get_all") as get_all:
+		with (
+			patch(
+				"gate_entry.gate_entry.doctype.gate_pass.gate_pass.frappe.get_cached_doc",
+				side_effect=fake_get_cached,
+			),
+			patch("gate_entry.gate_entry.doctype.gate_pass.gate_pass.frappe.get_all") as get_all,
+		):
 			get_all.return_value = []
 
 			gate_pass.before_validate()
@@ -379,4 +385,3 @@ class TestStockEntryIntegration(FrappeTestCase):
 	def tearDown(self):
 		"""Clean up test data"""
 		frappe.db.rollback()
-

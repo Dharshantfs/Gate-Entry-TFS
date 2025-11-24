@@ -357,7 +357,10 @@ class TestGatePass(FrappeTestCase):
 				self.assertIsNone(value)
 
 		with (
-			patch("gate_entry.gate_entry.doctype.gate_pass.gate_pass.frappe.db.exists", side_effect=fake_db_exists),
+			patch(
+				"gate_entry.gate_entry.doctype.gate_pass.gate_pass.frappe.db.exists",
+				side_effect=fake_db_exists,
+			),
 			patch(
 				"gate_entry.gate_entry.doctype.gate_pass.gate_pass.frappe.db.get_value",
 				side_effect=fake_db_get_value,
