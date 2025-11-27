@@ -89,17 +89,6 @@ frappe.ui.form.on("Gate Pass", {
 			};
 		});
 
-		// Filter Reference Number based on Document Reference
-		if (frm.doc.document_reference) {
-			frm.set_query("reference_number", function () {
-				return {
-					filters: {
-						docstatus: 1, // Only show submitted documents
-					},
-				};
-			});
-		}
-
 		refresh_compliance_status(frm);
 	},
 	onload(frm) {
@@ -126,6 +115,24 @@ frappe.ui.form.on("Gate Pass", {
 		// Clear reference number when document reference changes
 		if (frm.doc.reference_number) {
 			frm.set_value("reference_number", "");
+		}
+		if (frm.doc.document_reference) {
+			frm.set_query("reference_number", function () {
+				console.log("On document_reference change Reference Number Filter Applied");
+				let filters = { docstatus: 1 };
+				if (
+					frm.doc.document_reference === "Purchase Order" ||
+					frm.doc.document_reference === "Subcontracting Order"
+				) {
+					filters["status"] = ["!=", "Closed"];
+				} else if (frm.doc.document_reference === "Stock Entry") {
+					filters["stock_entry_type"] = [
+						"in",
+						["Material Transfer", "Send to Subcontractor"],
+					];
+				}
+				return { filters: filters };
+			});
 		}
 
 		// Update entry type locally for better UX

@@ -409,7 +409,7 @@ def get_purchase_receipt_totals(filters: frappe._dict):
 	if filters.get("customer"):
 		return {}
 
-	conditions = ["pr.docstatus = 1", "pri.purchase_order is not null"]
+	conditions = ["pr.docstatus = 1", "pri.purchase_order is not null", "pr.subcontracting_receipt is null"]
 	values: dict[str, object] = {}
 
 	if filters.get("from_date"):
