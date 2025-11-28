@@ -94,6 +94,22 @@ The app adds the following custom fields to Stock Entry (all removed on uninstal
 
 For detailed installation and uninstallation instructions, see [INSTALLATION.md](INSTALLATION.md).
 
+### Releases
+
+This module follows [Semantic Versioning](https://semver.org/) and is compatible with ERPNext v15.x.
+
+**Current Version:** 1.0.0
+
+For release information and version history, see [CHANGELOG.md](CHANGELOG.md).
+
+To create a new release, follow the process outlined in [RELEASE.md](RELEASE.md) or use the quick reference guide in [scripts/QUICK_RELEASE.md](scripts/QUICK_RELEASE.md).
+
+**Quick release command:**
+```bash
+./scripts/release.sh <version>
+# Example: ./scripts/release.sh 1.0.0
+```
+
 ### Contributing
 
 This app uses `pre-commit` for code formatting and linting. Please [install pre-commit](https://pre-commit.com/#installation) and enable it for this repository:

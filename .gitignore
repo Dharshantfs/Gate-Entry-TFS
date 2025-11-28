@@ -6,3 +6,4 @@ tags
 node_modules
 __pycache__
 tasks/**
+RELEASE.md
