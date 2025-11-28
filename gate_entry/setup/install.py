@@ -38,6 +38,7 @@ def after_install():
 	ensure_reports()
 	ensure_security_guard_permissions()
 	reload_gate_pass_doctype()
+	ensure_workspace()
 
 
 def after_migrate():
@@ -46,6 +47,7 @@ def after_migrate():
 	ensure_reports()
 	ensure_security_guard_permissions()
 	reload_gate_pass_doctype()
+	ensure_workspace()
 
 
 def create_gate_entry_custom_fields():
@@ -82,5 +84,19 @@ def ensure_reports():
 				title="Gate Entry Report Reload",
 			)
 	# Commit so the reports are persisted when running bench migrate/execute
+	# nosemgrep
+	frappe.db.commit()
+
+
+def ensure_workspace():
+	"""Reload workspace so it is available in the sidebar."""
+	try:
+		frappe.reload_doc("gate_entry", "workspace", "gate_entry")
+	except Exception as exc:
+		frappe.log_error(
+			message=f"Failed to reload Gate Entry workspace: {exc}",
+			title="Gate Entry Workspace Reload",
+		)
+	# Commit so the workspace is persisted
 	# nosemgrep
 	frappe.db.commit()
