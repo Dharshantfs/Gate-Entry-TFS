@@ -6,6 +6,13 @@ on:
     branches:
       - develop
   pull_request:
+  workflow_dispatch:
+    inputs:
+      frappe_version:
+        description: 'Frappe version to use'
+        required: false
+        default: 'version-15'
+        type: string
 
 concurrency:
   group: develop-gate_entry-${{ github.event.number }}
@@ -14,6 +21,8 @@ concurrency:
 jobs:
   tests:
     runs-on: ubuntu-latest
+    env:
+      FRAPPE_VERSION: ${{ github.event.inputs.frappe_version || 'version-15' }}
 
     services:
       redis-cache:
@@ -81,15 +90,15 @@ jobs:
       - name: Setup
         run: |
           pip install frappe-bench
-          bench init --skip-redis-config-generation --skip-assets --version version-15 --python "$(which python)" ~/frappe-bench
+          bench init --skip-redis-config-generation --skip-assets --version "${{ env.FRAPPE_VERSION }}" --python "$(which python)" ~/frappe-bench
           mariadb --host 127.0.0.1 --port 3306 -u root -proot -e "SET GLOBAL character_set_server = 'utf8mb4'"
           mariadb --host 127.0.0.1 --port 3306 -u root -proot -e "SET GLOBAL collation_server = 'utf8mb4_unicode_ci'"
 
       - name: Install
         working-directory: /home/runner/frappe-bench
         run: |
-          bench get-app --branch version-15 erpnext
-          bench get-app --branch version-15 https://github.com/resilient-tech/india-compliance"
+          bench get-app --branch "${{ env.FRAPPE_VERSION }}" erpnext
+          bench get-app --branch "${{ env.FRAPPE_VERSION }}" https://github.com/resilient-tech/india-compliance
           bench get-app gate_entry $GITHUB_WORKSPACE
           bench setup requirements --dev
           bench new-site --db-root-password root --admin-password admin test_site
