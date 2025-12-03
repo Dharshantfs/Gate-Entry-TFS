@@ -1,7 +1,7 @@
 [project]
 name = "gate_entry"
 authors = [
-    { name = "Gurudatt Kulkarni", email = "abcd@example.com"}
+    { name = "Gurudatt Kulkarni", email = "connect@gurudatt.in"}
 ]
 description = "An erpnext security gate module for recording material and people movement"
 requires-python = ">=3.10"
