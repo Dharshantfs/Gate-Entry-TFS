@@ -13,6 +13,11 @@ on:
         required: false
         default: 'version-15'
         type: string
+      app-name:
+        description: 'App name to use'
+        required: false
+        default: 'gate_entry'
+        type: string
 
 concurrency:
   group: develop-gate_entry-${{ github.event.number }}
@@ -23,6 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       FRAPPE_VERSION: ${{ github.event.inputs.frappe_version || 'version-15' }}
+      APP_NAME: ${{ github.event.inputs['app-name'] || 'gate_entry' }}
 
     services:
       redis-cache:
@@ -111,8 +117,6 @@ jobs:
 
       - name: Run Tests
         working-directory: /home/runner/frappe-bench
-        run: |
-          bench --site test_site set-config allow_tests true
-          bench --site test_site run-tests --app gate_entry
+        run: bench --site test_site run-parallel-tests --app "${{ env.APP_NAME }}"
         env:
           TYPE: server
