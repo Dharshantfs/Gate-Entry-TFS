@@ -148,6 +148,7 @@ def create_test_records():
 	"""Create test records from test_records.json if it exists."""
 	try:
 		import os
+
 		test_records_path = frappe.get_app_path("gate_entry", "tests", "test_records.json")
 		if os.path.exists(test_records_path):
 			test_records = frappe.get_file_json(test_records_path)
@@ -176,10 +177,10 @@ def set_default_company_for_tests():
 			company_name,
 			{
 				"enable_perpetual_inventory": 1,
-				"default_inventory_account": f"Stock In Hand - WP",
-				"stock_adjustment_account": f"Stock Adjustment - WP",
-				"stock_received_but_not_billed": f"Stock Received But Not Billed - WP",
-				"expenses_included_in_valuation": f"Expenses Included In Valuation - WP",
+				"default_inventory_account": "Stock In Hand - WP",
+				"stock_adjustment_account": "Stock Adjustment - WP",
+				"stock_received_but_not_billed": "Stock Received But Not Billed - WP",
+				"expenses_included_in_valuation": "Expenses Included In Valuation - WP",
 			},
 		)
 
@@ -200,10 +201,7 @@ def ensure_warehouses_exist():
 
 		# Check if any warehouse exists for this company
 		existing_warehouses = frappe.db.get_all(
-			"Warehouse",
-			filters={"company": company_name},
-			fields=["name"],
-			limit=1
+			"Warehouse", filters={"company": company_name}, fields=["name"], limit=1
 		)
 
 		# If no warehouses exist, trigger company.on_update() to create default warehouses
@@ -224,19 +222,19 @@ def ensure_warehouses_exist():
 
 		# Get parent warehouse (All Warehouses)
 		parent_warehouse = frappe.db.get_value(
-			"Warehouse",
-			{"warehouse_name": "All Warehouses", "company": company_name},
-			"name"
+			"Warehouse", {"warehouse_name": "All Warehouses", "company": company_name}, "name"
 		)
 
 		if not parent_warehouse:
 			# Create parent warehouse first
-			parent_wh = frappe.get_doc({
-				"doctype": "Warehouse",
-				"warehouse_name": "All Warehouses",
-				"is_group": 1,
-				"company": company_name,
-			})
+			parent_wh = frappe.get_doc(
+				{
+					"doctype": "Warehouse",
+					"warehouse_name": "All Warehouses",
+					"is_group": 1,
+					"company": company_name,
+				}
+			)
 			parent_wh.flags.ignore_permissions = True
 			parent_wh.flags.ignore_mandatory = True
 			parent_wh.insert()
@@ -250,15 +248,19 @@ def ensure_warehouses_exist():
 			# Check by full name (with abbreviation) first
 			if not frappe.db.exists("Warehouse", warehouse_full_name):
 				# Also check by warehouse_name and company
-				if not frappe.db.exists("Warehouse", {"warehouse_name": wh_info["name"], "company": company_name}):
-					warehouse = frappe.get_doc({
-						"doctype": "Warehouse",
-						"warehouse_name": wh_info["name"],
-						"is_group": wh_info.get("is_group", 0),
-						"company": company_name,
-						"parent_warehouse": parent_warehouse,
-						"warehouse_type": wh_info.get("warehouse_type"),
-					})
+				if not frappe.db.exists(
+					"Warehouse", {"warehouse_name": wh_info["name"], "company": company_name}
+				):
+					warehouse = frappe.get_doc(
+						{
+							"doctype": "Warehouse",
+							"warehouse_name": wh_info["name"],
+							"is_group": wh_info.get("is_group", 0),
+							"company": company_name,
+							"parent_warehouse": parent_warehouse,
+							"warehouse_type": wh_info.get("warehouse_type"),
+						}
+					)
 					warehouse.flags.ignore_permissions = True
 					warehouse.flags.ignore_mandatory = True
 					warehouse.insert()
