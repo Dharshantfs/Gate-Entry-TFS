@@ -184,7 +184,7 @@ doc_events = {
 # Testing
 # -------
 
-# before_tests = "gate_entry.install.before_tests"
+before_tests = "gate_entry.tests.before_tests"
 
 # Overriding Methods
 # ------------------------------
