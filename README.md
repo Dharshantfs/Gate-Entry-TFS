@@ -5,6 +5,10 @@ An erpnext security gate module for recording material and people movement
 
 You can install this app using the [bench](https://github.com/frappe/bench) CLI:
 
+### Prerequisites
+  - ERPNext Installed
+  - India Compliance Installed
+
 ```bash
 cd $PATH_TO_YOUR_BENCH
 bench get-app $URL_OF_THIS_REPO --branch develop
