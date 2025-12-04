@@ -2,12 +2,13 @@
 
 This document describes the installation and uninstallation process for the Gate Entry app, including what customizations are made to ERPNext and how they are restored during uninstallation.
 
-## Installation
+# Installation
 
 ### Prerequisites
 
 - Frappe Framework installed
 - ERPNext app installed
+- India Compliance installed
 - Bench CLI available
 
 ### Installation Steps
