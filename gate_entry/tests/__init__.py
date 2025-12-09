@@ -4,6 +4,7 @@
 from functools import partial
 
 import frappe
+from erpnext.accounts.utils import get_fiscal_year
 from frappe.desk.page.setup_wizard.setup_wizard import setup_complete
 from frappe.test_runner import make_test_objects
 from frappe.utils import getdate
@@ -73,6 +74,18 @@ def ensure_transit_warehouse_type():
 			message=f"Failed to create Transit Warehouse Type: {exc}",
 			title="Gate Entry Test Setup - Warehouse Type",
 		)
+
+
+def add_companies_to_fiscal_year(data):
+	fy = get_fiscal_year(getdate(), as_dict=True)
+	doc = frappe.get_doc("Fiscal Year", fy.name)
+	fy_companies = [row.company for row in doc.companies]
+
+	for company in data:
+		if (company_name := company["company_name"]) not in fy_companies:
+			doc.append("companies", {"company": company_name})
+
+	doc.save(ignore_permissions=True)
 
 
 def ensure_uoms():
@@ -155,6 +168,8 @@ def create_test_records():
 
 			for doctype, data in test_records.items():
 				make_test_objects(doctype, data)
+				if doctype == "Company":
+					add_companies_to_fiscal_year(data)
 	except Exception as exc:
 		frappe.log_error(
 			message=f"Failed to create test records: {exc}",

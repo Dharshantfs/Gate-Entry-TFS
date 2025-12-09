@@ -1287,7 +1287,7 @@ def extract_compliance_details(doc, document_reference):
 def get_gst_settings():
 	"""
 	Get GST Settings document if India Compliance app is installed.
-	Returns empty dict if GST Settings doctype is not available.
+	Returns empty dict if GST Settings doctype is not available or if there are schema issues.
 	"""
 	# Check if GST Settings doctype exists (India Compliance app might not be installed)
 	if not frappe.db.exists("DocType", "GST Settings"):
@@ -1295,7 +1295,11 @@ def get_gst_settings():
 
 	try:
 		return frappe.get_cached_doc("GST Settings")
-	except frappe.DoesNotExistError:
+	except (frappe.DoesNotExistError, Exception):
+		# Handle cases where:
+		# - GST Settings document doesn't exist
+		# - Database schema issues (e.g., missing columns in child tables)
+		# - India Compliance app is partially installed or migrations not run
 		return frappe._dict()
 
 
