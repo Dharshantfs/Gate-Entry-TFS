@@ -20,7 +20,7 @@ def before_tests():
 		today = getdate()
 		year = today.year if today.month > 3 else today.year - 1
 
-		data = setup_complete(
+		setup_complete(
 			{
 				"currency": "INR",
 				"full_name": "Test User",
@@ -38,7 +38,6 @@ def before_tests():
 				"chart_of_accounts": "Standard",
 			}
 		)
-		print("data", data)
 
 	# Enable all roles for admin (like ERPNext does)
 	_enable_all_roles_for_admin()
@@ -48,7 +47,6 @@ def before_tests():
 	set_default_company_for_tests()
 	ensure_warehouses_exist()
 	frappe.db.commit()
-	frappe.flags.country = "India"
 	frappe.flags.skip_test_records = True
 	frappe.enqueue = partial(frappe.enqueue, now=True)
 

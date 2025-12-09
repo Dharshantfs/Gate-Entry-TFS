@@ -704,7 +704,7 @@ class GatePass(Document):
 			return
 
 		settings = get_gst_settings()
-		threshold = flt(settings.get("e_waybill_threshold") or 50000)
+		threshold = flt(settings.get("e_waybill_threshold") or 0)
 		if not threshold:
 			return
 
