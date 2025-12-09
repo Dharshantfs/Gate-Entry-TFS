@@ -704,7 +704,7 @@ class GatePass(Document):
 			return
 
 		settings = get_gst_settings()
-		threshold = flt(settings.get("e_waybill_threshold") or 0)
+		threshold = flt(settings.get("e_waybill_threshold") or 50000)
 		if not threshold:
 			return
 
@@ -1285,6 +1285,14 @@ def extract_compliance_details(doc, document_reference):
 
 
 def get_gst_settings():
+	"""
+	Get GST Settings document if India Compliance app is installed.
+	Returns empty dict if GST Settings doctype is not available.
+	"""
+	# Check if GST Settings doctype exists (India Compliance app might not be installed)
+	if not frappe.db.exists("DocType", "GST Settings"):
+		return frappe._dict()
+
 	try:
 		return frappe.get_cached_doc("GST Settings")
 	except frappe.DoesNotExistError:
