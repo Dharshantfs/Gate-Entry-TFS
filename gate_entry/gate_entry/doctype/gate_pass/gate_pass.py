@@ -699,6 +699,10 @@ class GatePass(Document):
 		self.e_waybill_number = None
 
 	def enforce_outbound_compliance(self, reference_doc):
+		# Only enforce compliance if GST Settings doctype is available
+		if not frappe.db.exists("DocType", "GST Settings"):
+			return
+
 		settings = get_gst_settings()
 		threshold = flt(settings.get("e_waybill_threshold") or 0)
 		if not threshold:
