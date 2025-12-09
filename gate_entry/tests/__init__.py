@@ -179,8 +179,7 @@ def set_default_company_for_tests():
 				"enable_perpetual_inventory": 1,
 				"default_inventory_account": "Stock In Hand - WP",
 				"stock_adjustment_account": "Stock Adjustment - WP",
-				"stock_received_but_not_billed": "Stock Received But Not Billed - WP",
-				"expenses_included_in_valuation": "Expenses Included In Valuation - WP",
+				"stock_received_but_not_billed": "Stock Received But Not Billed - WP"
 			},
 		)
 
