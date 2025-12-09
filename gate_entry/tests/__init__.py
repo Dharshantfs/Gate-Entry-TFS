@@ -38,6 +38,7 @@ def before_tests():
 				"chart_of_accounts": "Standard",
 			}
 		)
+		print("data", data)
 
 	# Enable all roles for admin (like ERPNext does)
 	_enable_all_roles_for_admin()
@@ -52,7 +53,6 @@ def before_tests():
 	frappe.enqueue = partial(frappe.enqueue, now=True)
 
 
-
 def add_companies_to_fiscal_year(data):
 	fy = get_fiscal_year(getdate(), as_dict=True)
 	doc = frappe.get_doc("Fiscal Year", fy.name)
@@ -63,6 +63,7 @@ def add_companies_to_fiscal_year(data):
 			doc.append("companies", {"company": company_name})
 
 	doc.save(ignore_permissions=True)
+
 
 def _enable_all_roles_for_admin():
 	"""Enable all roles for Administrator user (like ERPNext does)."""
@@ -91,11 +92,14 @@ def set_default_settings_for_tests():
 
 	# Stock Settings
 	frappe.db.set_single_value("Stock Settings", "allow_negative_stock", 1)
-	frappe.db.set_single_value("Stock Settings", "auto_insert_price_list_rate_if_missing", 0)
 
 	# Ensure default UOM is set (in case ensure_uoms didn't set it)
 	if frappe.db.exists("UOM", "Nos"):
 		frappe.db.set_single_value("Stock Settings", "stock_uom", "Nos")
+
+	# Enable Sandbox Mode in GST Settings
+	if frappe.db.exists("GST Settings"):
+		frappe.db.set_single_value("GST Settings", "sandbox_mode", 1)
 
 
 def create_test_records():
