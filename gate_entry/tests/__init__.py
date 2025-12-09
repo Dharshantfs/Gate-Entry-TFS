@@ -15,18 +15,12 @@ def before_tests():
 	"""Set up test environment for Gate Entry module."""
 	frappe.clear_cache()
 
-	# Ensure Transit Warehouse Type exists (required for Company default warehouses)
-	ensure_transit_warehouse_type()
-
-	# Ensure required UOMs exist before creating items
-	ensure_uoms()
-
 	# Set up company if it doesn't exist
 	if not frappe.db.a_row_exists("Company"):
 		today = getdate()
 		year = today.year if today.month > 3 else today.year - 1
 
-		setup_complete(
+		data = setup_complete(
 			{
 				"currency": "INR",
 				"full_name": "Test User",
@@ -44,8 +38,6 @@ def before_tests():
 				"chart_of_accounts": "Standard",
 			}
 		)
-		# Ensure UOMs still exist after setup_complete (it might reset things)
-		ensure_uoms()
 
 	# Enable all roles for admin (like ERPNext does)
 	_enable_all_roles_for_admin()
@@ -55,25 +47,10 @@ def before_tests():
 	set_default_company_for_tests()
 	ensure_warehouses_exist()
 	frappe.db.commit()
-
+	frappe.flags.country = "India"
 	frappe.flags.skip_test_records = True
 	frappe.enqueue = partial(frappe.enqueue, now=True)
 
-
-def ensure_transit_warehouse_type():
-	"""Ensure 'Transit' Warehouse Type exists (required for Company default warehouses)."""
-	try:
-		frappe.reload_doc("stock", "doctype", "warehouse_type")
-		if not frappe.db.exists("Warehouse Type", "Transit"):
-			doc = frappe.new_doc("Warehouse Type")
-			doc.name = "Transit"
-			doc.insert(ignore_permissions=True)
-			frappe.db.commit()
-	except Exception as exc:
-		frappe.log_error(
-			message=f"Failed to create Transit Warehouse Type: {exc}",
-			title="Gate Entry Test Setup - Warehouse Type",
-		)
 
 
 def add_companies_to_fiscal_year(data):
@@ -86,42 +63,6 @@ def add_companies_to_fiscal_year(data):
 			doc.append("companies", {"company": company_name})
 
 	doc.save(ignore_permissions=True)
-
-
-def ensure_uoms():
-	"""Ensure required Unit of Measures exist before creating test items."""
-	required_uoms = ["Nos", "Kg", "Ltr", "Box", "Pcs"]
-	default_uom = "Nos"
-
-	try:
-		frappe.reload_doc("setup", "doctype", "UOM")
-		for uom_name in required_uoms:
-			if not frappe.db.exists("UOM", uom_name):
-				doc = frappe.get_doc({"doctype": "UOM", "uom_name": uom_name})
-				doc.insert(ignore_permissions=True)
-
-		frappe.db.commit()
-		frappe.clear_cache()
-
-		# Verify UOMs were created
-		for uom_name in required_uoms:
-			if not frappe.db.exists("UOM", uom_name):
-				raise Exception(f"Failed to create UOM: {uom_name}")
-
-		# Set default UOM in Stock Settings
-		if frappe.db.exists("UOM", default_uom):
-			frappe.reload_doc("stock", "doctype", "stock_settings")
-			frappe.db.set_single_value("Stock Settings", "stock_uom", default_uom)
-			frappe.db.commit()
-			frappe.clear_cache()
-	except Exception as exc:
-		frappe.log_error(
-			message=f"Failed to create UOMs: {exc}",
-			title="Gate Entry Test Setup - UOM",
-		)
-		# Re-raise to prevent silent failures
-		raise
-
 
 def _enable_all_roles_for_admin():
 	"""Enable all roles for Administrator user (like ERPNext does)."""
