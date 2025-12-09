@@ -46,6 +46,10 @@ class MockQueryBuilder:
 	def groupby(self, *args):
 		return self
 
+	def limit(self, *args):
+		"""Mock limit method for query builder chaining."""
+		return self
+
 	def run(self, pluck=False, as_dict=False):
 		"""Return different values based on pluck vs as_dict."""
 		if pluck:
@@ -383,6 +387,10 @@ class TestGatePass(FrappeTestCase):
 			patch(
 				"gate_entry.gate_entry.doctype.gate_pass.gate_pass.frappe.qb.from_",
 				side_effect=fake_qb_from,
+			),
+			patch(
+				"gate_entry.gate_entry.doctype.gate_pass.gate_pass.frappe.db.exists",
+				side_effect=lambda dt, dn=None: dt == "DocType" and dn == "GST Settings" if dn else False,
 			),
 			patch.object(GatePass, "align_gate_pass_items", new=patched_align),
 			patch.object(GatePass, "validate_outbound_quantities", return_value=None),

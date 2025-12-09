@@ -47,7 +47,9 @@ def ensure_security_guard_permissions() -> None:
 		add_read_only_permission(doctype, SECURITY_GUARD_ROLE)
 
 	# Guards need the e-way bill threshold from GST Settings to evaluate compliance.
-	add_read_only_permission("GST Settings", SECURITY_GUARD_ROLE)
+	# Only add permissions if GST Settings doctype is available.
+	if frappe.db.exists("DocType", "GST Settings"):
+		add_read_only_permission("GST Settings", SECURITY_GUARD_ROLE)
 
 
 def add_read_only_permission(doctype: str, role: str, permlevel: int = 0) -> None:

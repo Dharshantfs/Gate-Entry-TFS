@@ -4,6 +4,7 @@
 from functools import partial
 
 import frappe
+from erpnext.accounts.utils import get_fiscal_year
 from frappe.desk.page.setup_wizard.setup_wizard import setup_complete
 from frappe.test_runner import make_test_objects
 from frappe.utils import getdate
@@ -13,12 +14,6 @@ from frappe.utils.nestedset import get_root_of
 def before_tests():
 	"""Set up test environment for Gate Entry module."""
 	frappe.clear_cache()
-
-	# Ensure Transit Warehouse Type exists (required for Company default warehouses)
-	ensure_transit_warehouse_type()
-
-	# Ensure required UOMs exist before creating items
-	ensure_uoms()
 
 	# Set up company if it doesn't exist
 	if not frappe.db.a_row_exists("Company"):
@@ -43,8 +38,6 @@ def before_tests():
 				"chart_of_accounts": "Standard",
 			}
 		)
-		# Ensure UOMs still exist after setup_complete (it might reset things)
-		ensure_uoms()
 
 	# Enable all roles for admin (like ERPNext does)
 	_enable_all_roles_for_admin()
@@ -54,60 +47,20 @@ def before_tests():
 	set_default_company_for_tests()
 	ensure_warehouses_exist()
 	frappe.db.commit()
-
 	frappe.flags.skip_test_records = True
 	frappe.enqueue = partial(frappe.enqueue, now=True)
 
 
-def ensure_transit_warehouse_type():
-	"""Ensure 'Transit' Warehouse Type exists (required for Company default warehouses)."""
-	try:
-		frappe.reload_doc("stock", "doctype", "warehouse_type")
-		if not frappe.db.exists("Warehouse Type", "Transit"):
-			doc = frappe.new_doc("Warehouse Type")
-			doc.name = "Transit"
-			doc.insert(ignore_permissions=True)
-			frappe.db.commit()
-	except Exception as exc:
-		frappe.log_error(
-			message=f"Failed to create Transit Warehouse Type: {exc}",
-			title="Gate Entry Test Setup - Warehouse Type",
-		)
+def add_companies_to_fiscal_year(data):
+	fy = get_fiscal_year(getdate(), as_dict=True)
+	doc = frappe.get_doc("Fiscal Year", fy.name)
+	fy_companies = [row.company for row in doc.companies]
 
+	for company in data:
+		if (company_name := company["company_name"]) not in fy_companies:
+			doc.append("companies", {"company": company_name})
 
-def ensure_uoms():
-	"""Ensure required Unit of Measures exist before creating test items."""
-	required_uoms = ["Nos", "Kg", "Ltr", "Box", "Pcs"]
-	default_uom = "Nos"
-
-	try:
-		frappe.reload_doc("setup", "doctype", "UOM")
-		for uom_name in required_uoms:
-			if not frappe.db.exists("UOM", uom_name):
-				doc = frappe.get_doc({"doctype": "UOM", "uom_name": uom_name})
-				doc.insert(ignore_permissions=True)
-
-		frappe.db.commit()
-		frappe.clear_cache()
-
-		# Verify UOMs were created
-		for uom_name in required_uoms:
-			if not frappe.db.exists("UOM", uom_name):
-				raise Exception(f"Failed to create UOM: {uom_name}")
-
-		# Set default UOM in Stock Settings
-		if frappe.db.exists("UOM", default_uom):
-			frappe.reload_doc("stock", "doctype", "stock_settings")
-			frappe.db.set_single_value("Stock Settings", "stock_uom", default_uom)
-			frappe.db.commit()
-			frappe.clear_cache()
-	except Exception as exc:
-		frappe.log_error(
-			message=f"Failed to create UOMs: {exc}",
-			title="Gate Entry Test Setup - UOM",
-		)
-		# Re-raise to prevent silent failures
-		raise
+	doc.save(ignore_permissions=True)
 
 
 def _enable_all_roles_for_admin():
@@ -137,11 +90,14 @@ def set_default_settings_for_tests():
 
 	# Stock Settings
 	frappe.db.set_single_value("Stock Settings", "allow_negative_stock", 1)
-	frappe.db.set_single_value("Stock Settings", "auto_insert_price_list_rate_if_missing", 0)
 
 	# Ensure default UOM is set (in case ensure_uoms didn't set it)
 	if frappe.db.exists("UOM", "Nos"):
 		frappe.db.set_single_value("Stock Settings", "stock_uom", "Nos")
+
+	# Enable Sandbox Mode in GST Settings
+	if frappe.db.exists("GST Settings"):
+		frappe.db.set_single_value("GST Settings", "sandbox_mode", 1)
 
 
 def create_test_records():
@@ -155,6 +111,8 @@ def create_test_records():
 
 			for doctype, data in test_records.items():
 				make_test_objects(doctype, data)
+				if doctype == "Company":
+					add_companies_to_fiscal_year(data)
 	except Exception as exc:
 		frappe.log_error(
 			message=f"Failed to create test records: {exc}",
@@ -180,7 +138,6 @@ def set_default_company_for_tests():
 				"default_inventory_account": "Stock In Hand - WP",
 				"stock_adjustment_account": "Stock Adjustment - WP",
 				"stock_received_but_not_billed": "Stock Received But Not Billed - WP",
-				"expenses_included_in_valuation": "Expenses Included In Valuation - WP",
 			},
 		)
 

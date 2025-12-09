@@ -699,6 +699,10 @@ class GatePass(Document):
 		self.e_waybill_number = None
 
 	def enforce_outbound_compliance(self, reference_doc):
+		# Only enforce compliance if GST Settings doctype is available
+		if not frappe.db.exists("DocType", "GST Settings"):
+			return
+
 		settings = get_gst_settings()
 		threshold = flt(settings.get("e_waybill_threshold") or 0)
 		if not threshold:
@@ -1281,9 +1285,21 @@ def extract_compliance_details(doc, document_reference):
 
 
 def get_gst_settings():
+	"""
+	Get GST Settings document if India Compliance app is installed.
+	Returns empty dict if GST Settings doctype is not available or if there are schema issues.
+	"""
+	# Check if GST Settings doctype exists (India Compliance app might not be installed)
+	if not frappe.db.exists("DocType", "GST Settings"):
+		return frappe._dict()
+
 	try:
 		return frappe.get_cached_doc("GST Settings")
-	except frappe.DoesNotExistError:
+	except (frappe.DoesNotExistError, Exception):
+		# Handle cases where:
+		# - GST Settings document doesn't exist
+		# - Database schema issues (e.g., missing columns in child tables)
+		# - India Compliance app is partially installed or migrations not run
 		return frappe._dict()
 
 
