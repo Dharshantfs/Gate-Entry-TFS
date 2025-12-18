@@ -255,7 +255,7 @@ def ensure_warehouses_exist():
 			)
 			parent_wh.flags.ignore_permissions = True
 			parent_wh.flags.ignore_mandatory = True
-			parent_wh.insert()
+			parent_wh.insert(ignore_permissions=True)
 			parent_warehouse = parent_wh.name
 		for wh_info in required_warehouses:
 			warehouse_full_name = f"{wh_info['name']} - {company_abbr}"

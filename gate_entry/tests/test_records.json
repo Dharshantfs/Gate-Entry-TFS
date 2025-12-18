@@ -49,7 +49,12 @@
 					"selling_cost_center": "Main - WP",
 					"income_account": "Sales - WP"
 				}
-			]
+			],
+			"taxes": [
+                {
+                    "item_tax_template": "Nil-Rated - WP"
+                }
+            ]
 		},
 		{
 			"doctype": "Item",
@@ -78,7 +83,12 @@
 					"selling_cost_center": "Main - WP",
 					"income_account": "Sales - WP"
 				}
-			]
+			],
+			"taxes": [
+                {
+                    "item_tax_template": "Nil-Rated - WP"
+                }
+            ]
 		},
 		{
 			"doctype": "Item",
@@ -107,7 +117,12 @@
 					"selling_cost_center": "Main - WP",
 					"income_account": "Sales - WP"
 				}
-			]
+			],
+			"taxes": [
+                {
+                    "item_tax_template": "Nil-Rated - WP"
+                }
+            ]
 		}
 	],
 	"Supplier": [
