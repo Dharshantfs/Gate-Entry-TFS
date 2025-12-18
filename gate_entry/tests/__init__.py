@@ -257,9 +257,6 @@ def ensure_warehouses_exist():
 			parent_wh.flags.ignore_mandatory = True
 			parent_wh.insert()
 			parent_warehouse = parent_wh.name
-
-		# Create missing warehouses
-		warehouses_created = False
 		for wh_info in required_warehouses:
 			warehouse_full_name = f"{wh_info['name']} - {company_abbr}"
 			# Check by full name (with abbreviation) first
@@ -281,7 +278,6 @@ def ensure_warehouses_exist():
 					warehouse.flags.ignore_permissions = True
 					warehouse.flags.ignore_mandatory = True
 					warehouse.insert(ignore_permissions=True)
-					warehouses_created = True
 
 	except Exception as exc:
 		frappe.log_error(
