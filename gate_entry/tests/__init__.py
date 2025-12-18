@@ -58,6 +58,7 @@ def before_tests():
 	set_default_company_for_tests()
 	ensure_warehouses_exist()
 	frappe.db.commit()
+	frappe.clear_cache()
 
 	frappe.flags.skip_test_records = True
 	frappe.enqueue = partial(frappe.enqueue, now=True)
@@ -71,7 +72,6 @@ def ensure_transit_warehouse_type():
 			doc = frappe.new_doc("Warehouse Type")
 			doc.name = "Transit"
 			doc.insert(ignore_permissions=True)
-			frappe.db.commit()
 	except Exception as exc:
 		frappe.log_error(
 			message=f"Failed to create Transit Warehouse Type: {exc}",
@@ -91,9 +91,6 @@ def ensure_uoms():
 				doc = frappe.get_doc({"doctype": "UOM", "uom_name": uom_name})
 				doc.insert(ignore_permissions=True)
 
-		frappe.db.commit()
-		frappe.clear_cache()
-
 		# Verify UOMs were created
 		for uom_name in required_uoms:
 			if not frappe.db.exists("UOM", uom_name):
@@ -103,8 +100,6 @@ def ensure_uoms():
 		if frappe.db.exists("UOM", default_uom):
 			frappe.reload_doc("stock", "doctype", "stock_settings")
 			frappe.db.set_single_value("Stock Settings", "stock_uom", default_uom)
-			frappe.db.commit()
-			frappe.clear_cache()
 	except Exception as exc:
 		frappe.log_error(
 			message=f"Failed to create UOMs: {exc}",
@@ -128,8 +123,6 @@ def add_company_to_fiscal_year(company_name):
 		if company_name not in fy_companies:
 			doc.append("companies", {"company": company_name})
 			doc.save(ignore_permissions=True)
-			frappe.db.commit()
-			frappe.clear_cache()
 	except Exception as exc:
 		frappe.log_error(
 			message=f"Failed to add company to Fiscal Year: {exc}",
@@ -234,9 +227,7 @@ def ensure_warehouses_exist():
 		# If no warehouses exist, trigger company.on_update() to create default warehouses
 		if not existing_warehouses:
 			company.flags.ignore_validate = True
-			company.save()
-			frappe.db.commit()
-			frappe.clear_cache()
+			company.save(ignore_permissions=True)
 
 		# Verify warehouses exist, create if missing
 		required_warehouses = [
@@ -266,7 +257,6 @@ def ensure_warehouses_exist():
 			parent_wh.flags.ignore_mandatory = True
 			parent_wh.insert()
 			parent_warehouse = parent_wh.name
-			frappe.db.commit()
 
 		# Create missing warehouses
 		warehouses_created = False
@@ -290,12 +280,9 @@ def ensure_warehouses_exist():
 					)
 					warehouse.flags.ignore_permissions = True
 					warehouse.flags.ignore_mandatory = True
-					warehouse.insert()
+					warehouse.insert(ignore_permissions=True)
 					warehouses_created = True
 
-		if warehouses_created:
-			frappe.db.commit()
-			frappe.clear_cache()
 	except Exception as exc:
 		frappe.log_error(
 			message=f"Failed to ensure warehouses exist: {exc}",
