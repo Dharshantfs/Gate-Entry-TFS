@@ -15,12 +15,6 @@ def before_tests():
 	"""Set up test environment for Gate Entry module."""
 	frappe.clear_cache()
 
-	# Ensure Transit Warehouse Type exists (required for Company default warehouses)
-	ensure_transit_warehouse_type()
-
-	# Ensure required UOMs exist before creating items
-	ensure_uoms()
-
 	# Set up company if it doesn't exist
 	company_name = "Wind Power LLP"
 	if not frappe.db.a_row_exists("Company"):
@@ -45,8 +39,6 @@ def before_tests():
 				"chart_of_accounts": "Standard",
 			}
 		)
-		# Ensure UOMs still exist after setup_complete (it might reset things)
-		ensure_uoms()
 
 		add_company_to_fiscal_year(company_name)
 
@@ -58,7 +50,6 @@ def before_tests():
 	set_default_company_for_tests()
 	ensure_warehouses_exist()
 	frappe.db.commit()
-	frappe.clear_cache()
 
 	frappe.flags.skip_test_records = True
 	frappe.enqueue = partial(frappe.enqueue, now=True)
@@ -72,11 +63,24 @@ def ensure_transit_warehouse_type():
 			doc = frappe.new_doc("Warehouse Type")
 			doc.name = "Transit"
 			doc.insert(ignore_permissions=True)
+			frappe.db.commit()
 	except Exception as exc:
 		frappe.log_error(
 			message=f"Failed to create Transit Warehouse Type: {exc}",
 			title="Gate Entry Test Setup - Warehouse Type",
 		)
+
+
+def add_companies_to_fiscal_year(data):
+	fy = get_fiscal_year(getdate(), as_dict=True)
+	doc = frappe.get_doc("Fiscal Year", fy.name)
+	fy_companies = [row.company for row in doc.companies]
+
+	for company in data:
+		if (company_name := company["company_name"]) not in fy_companies:
+			doc.append("companies", {"company": company_name})
+
+	doc.save(ignore_permissions=True)
 
 
 def ensure_uoms():
@@ -91,6 +95,9 @@ def ensure_uoms():
 				doc = frappe.get_doc({"doctype": "UOM", "uom_name": uom_name})
 				doc.insert(ignore_permissions=True)
 
+		frappe.db.commit()
+		frappe.clear_cache()
+
 		# Verify UOMs were created
 		for uom_name in required_uoms:
 			if not frappe.db.exists("UOM", uom_name):
@@ -100,6 +107,8 @@ def ensure_uoms():
 		if frappe.db.exists("UOM", default_uom):
 			frappe.reload_doc("stock", "doctype", "stock_settings")
 			frappe.db.set_single_value("Stock Settings", "stock_uom", default_uom)
+			frappe.db.commit()
+			frappe.clear_cache()
 	except Exception as exc:
 		frappe.log_error(
 			message=f"Failed to create UOMs: {exc}",
@@ -158,11 +167,14 @@ def set_default_settings_for_tests():
 
 	# Stock Settings
 	frappe.db.set_single_value("Stock Settings", "allow_negative_stock", 1)
-	frappe.db.set_single_value("Stock Settings", "auto_insert_price_list_rate_if_missing", 0)
 
 	# Ensure default UOM is set (in case ensure_uoms didn't set it)
 	if frappe.db.exists("UOM", "Nos"):
 		frappe.db.set_single_value("Stock Settings", "stock_uom", "Nos")
+
+	# Enable Sandbox Mode in GST Settings
+	if frappe.db.exists("GST Settings"):
+		frappe.db.set_single_value("GST Settings", "sandbox_mode", 1)
 
 
 def create_test_records():
@@ -176,6 +188,8 @@ def create_test_records():
 
 			for doctype, data in test_records.items():
 				make_test_objects(doctype, data)
+				if doctype == "Company":
+					add_companies_to_fiscal_year(data)
 	except Exception as exc:
 		frappe.log_error(
 			message=f"Failed to create test records: {exc}",

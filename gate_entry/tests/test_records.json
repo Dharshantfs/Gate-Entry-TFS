@@ -1,4 +1,18 @@
 {
+	"Company": [{
+		"currency": "INR",
+		"full_name": "Test User",
+		"company_name": "Wind Power LLP",
+		"timezone": "Asia/Kolkata",
+		"company_abbr": "WP",
+		"industry": "Manufacturing",
+		"country": "India",
+		"language": "English",
+		"company_tagline": "Testing",
+		"email": "test@example.com",
+		"password": "test",
+		"chart_of_accounts": "Standard"
+	}],
 	"Gate Pass Type": [
 		{
 			"doctype": "Gate Pass Type",

@@ -1,9 +1,15 @@
 ### Gate Entry
 An erpnext security gate module for recording material and people movement
 
+Demo Video: https://drive.google.com/file/d/1mzmrLoa4C1H7ZSi5jn5PSRyO7kTLzZwh/view?usp=drive_link
+
 ### Installation
 
 You can install this app using the [bench](https://github.com/frappe/bench) CLI:
+
+### Prerequisites
+  - ERPNext Installed
+  - India Compliance Installed
 
 ```bash
 cd $PATH_TO_YOUR_BENCH
