@@ -4,6 +4,7 @@
 from functools import partial
 
 import frappe
+from erpnext.accounts.utils import get_fiscal_year
 from frappe.desk.page.setup_wizard.setup_wizard import setup_complete
 from frappe.test_runner import make_test_objects
 from frappe.utils import getdate
@@ -21,6 +22,7 @@ def before_tests():
 	ensure_uoms()
 
 	# Set up company if it doesn't exist
+	company_name = "Wind Power LLP"
 	if not frappe.db.a_row_exists("Company"):
 		today = getdate()
 		year = today.year if today.month > 3 else today.year - 1
@@ -29,7 +31,7 @@ def before_tests():
 			{
 				"currency": "INR",
 				"full_name": "Test User",
-				"company_name": "Wind Power LLP",
+				"company_name": company_name,
 				"timezone": "Asia/Kolkata",
 				"company_abbr": "WP",
 				"industry": "Manufacturing",
@@ -45,6 +47,8 @@ def before_tests():
 		)
 		# Ensure UOMs still exist after setup_complete (it might reset things)
 		ensure_uoms()
+
+		add_company_to_fiscal_year(company_name)
 
 	# Enable all roles for admin (like ERPNext does)
 	_enable_all_roles_for_admin()
@@ -108,6 +112,30 @@ def ensure_uoms():
 		)
 		# Re-raise to prevent silent failures
 		raise
+
+
+def add_company_to_fiscal_year(company_name):
+	try:
+		# Get the current Fiscal Year (created by setup_complete)
+		fy = get_fiscal_year(getdate(), as_dict=True)
+		if not fy:
+			return
+
+		doc = frappe.get_doc("Fiscal Year", fy.name)
+		fy_companies = [row.company for row in doc.companies]
+
+		# Add company if not already present
+		if company_name not in fy_companies:
+			doc.append("companies", {"company": company_name})
+			doc.save(ignore_permissions=True)
+			frappe.db.commit()
+			frappe.clear_cache()
+	except Exception as exc:
+		frappe.log_error(
+			message=f"Failed to add company to Fiscal Year: {exc}",
+			title="Gate Entry Test Setup - Fiscal Year",
+		)
+		# Don't re-raise - this is best-effort, but log for debugging
 
 
 def _enable_all_roles_for_admin():
