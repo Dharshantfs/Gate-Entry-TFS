@@ -37,7 +37,7 @@ def before_tests():
 				"email": "test@example.com",
 				"password": "test",
 				"chart_of_accounts": "Standard",
-				"company_gstin": "29MUMB22923F1D",
+				"company_gstin": "24AAQCA8719H1ZC",
 				"default_gst_rate": "18.0",
 				"enable_audit_trail": 0,
 			}
@@ -97,7 +97,7 @@ def set_default_company_for_tests():
 		# Set default company
 		global_defaults = frappe.get_single("Global Defaults")
 		global_defaults.default_company = company_name
-		global_defaults.save()
+		global_defaults.save(ignore_permissions=True)
 
 		# Configure stock settings for the company
 		frappe.db.set_value(
