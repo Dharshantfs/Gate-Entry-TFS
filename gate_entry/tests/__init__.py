@@ -43,6 +43,7 @@ def before_tests():
 			}
 		)
 	set_default_settings_for_tests()
+	ensure_warehouses_exist()
 	create_test_records()
 	set_default_company_for_tests()
 	frappe.db.commit()
@@ -90,25 +91,109 @@ def create_test_records():
 		)
 
 
+def ensure_warehouses_exist():
+	"""Ensure default warehouses exist for the test company."""
+	company_name = "Wind Power LLP"
+	company_abbr = "WP"
+
+	if not frappe.db.exists("Company", company_name):
+		return
+
+	try:
+		from frappe import _
+
+		# Reload company to trigger on_update which creates warehouses
+		company = frappe.get_doc("Company", company_name)
+
+		# Check if any warehouse exists for this company
+		existing_warehouses = frappe.db.get_all(
+			"Warehouse", filters={"company": company_name}, fields=["name"], limit=1
+		)
+
+		# If no warehouses exist, trigger company.on_update() to create default warehouses
+		if not existing_warehouses:
+			company.flags.ignore_validate = True
+			company.save(ignore_permissions=True)
+
+		# Verify warehouses exist, create if missing
+		required_warehouses = [
+			{"name": "Stores", "is_group": 0},
+			{"name": "Finished Goods", "is_group": 0},
+			{"name": "Work In Progress", "is_group": 0},
+			{"name": "Goods In Transit", "is_group": 0, "warehouse_type": "Transit"},
+			{"name": "Subcontractor", "is_group": 0},
+		]
+
+		# Get parent warehouse (All Warehouses)
+		parent_warehouse = frappe.db.get_value(
+			"Warehouse", {"warehouse_name": "All Warehouses", "company": company_name}, "name"
+		)
+
+		if not parent_warehouse:
+			# Create parent warehouse first
+			parent_wh = frappe.get_doc(
+				{
+					"doctype": "Warehouse",
+					"warehouse_name": "All Warehouses",
+					"is_group": 1,
+					"company": company_name,
+				}
+			)
+			parent_wh.flags.ignore_permissions = True
+			parent_wh.flags.ignore_mandatory = True
+			parent_wh.insert(ignore_permissions=True)
+			parent_warehouse = parent_wh.name
+		for wh_info in required_warehouses:
+			warehouse_full_name = f"{wh_info['name']} - {company_abbr}"
+			# Check by full name (with abbreviation) first
+			if not frappe.db.exists("Warehouse", warehouse_full_name):
+				# Also check by warehouse_name and company
+				if not frappe.db.exists(
+					"Warehouse", {"warehouse_name": wh_info["name"], "company": company_name}
+				):
+					warehouse = frappe.get_doc(
+						{
+							"doctype": "Warehouse",
+							"warehouse_name": wh_info["name"],
+							"is_group": wh_info.get("is_group", 0),
+							"company": company_name,
+							"parent_warehouse": parent_warehouse,
+							"warehouse_type": wh_info.get("warehouse_type"),
+						}
+					)
+					warehouse.flags.ignore_permissions = True
+					warehouse.flags.ignore_mandatory = True
+					warehouse.insert(ignore_permissions=True)
+
+	except Exception as exc:
+		frappe.log_error(
+			message=f"Failed to ensure warehouses exist: {exc}",
+			title="Gate Entry Test Setup - Warehouses",
+		)
+		# Re-raise to make test failures visible
+		raise
+
+
 def set_default_company_for_tests():
 	"""Set default company and configure it for tests."""
 	company_name = "Wind Power LLP"
-	# stock settings
-	frappe.db.set_value(
-		"Company",
-		company_name,
-		{
-			"enable_perpetual_inventory": 1,
-			"default_inventory_account": "Stock In Hand - WP",
-			"stock_adjustment_account": "Stock Adjustment - WP",
-			"stock_received_but_not_billed": "Stock Received But Not Billed - WP",
-		},
-	)
+	if frappe.db.exists("Company", company_name):
+		# stock settings
+		frappe.db.set_value(
+			"Company",
+			company_name,
+			{
+				"enable_perpetual_inventory": 1,
+				"default_inventory_account": "Stock In Hand - WP",
+				"stock_adjustment_account": "Stock Adjustment - WP",
+				"stock_received_but_not_billed": "Stock Received But Not Billed - WP",
+			},
+		)
 
-	# set default company
-	global_defaults = frappe.get_single("Global Defaults")
-	global_defaults.default_company = company_name
-	global_defaults.save()
+		# set default company
+		global_defaults = frappe.get_single("Global Defaults")
+		global_defaults.default_company = company_name
+		global_defaults.save(ignore_permissions=True)
 
 
 def add_companies_to_fiscal_year(data):
