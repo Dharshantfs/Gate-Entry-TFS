@@ -15,6 +15,10 @@ def before_tests():
 	"""Set up test environment for Gate Entry module."""
 	frappe.clear_cache()
 
+	# Ensure _Test Company exists (required by ERPNext and other test records)
+	# This must be created early as compat_preload_test_records_upfront may run before before_tests()
+	ensure_test_company_exists()
+
 	# Set up company if it doesn't exist
 	company_name = "Wind Power LLP"
 	if not frappe.db.a_row_exists("Company"):
@@ -37,7 +41,7 @@ def before_tests():
 				"email": "test@example.com",
 				"password": "test",
 				"chart_of_accounts": "Standard",
-				"company_gstin": "24AAQCA8719H1ZC",
+				"company_gstin": "24AAQCA8719H1ZA",
 				"default_gst_rate": "18.0",
 				"enable_audit_trail": 0,
 			}
@@ -51,6 +55,41 @@ def before_tests():
 	frappe.flags.country = "India"
 	frappe.flags.skip_test_records = True
 	frappe.enqueue = partial(frappe.enqueue, now=True)
+
+
+def ensure_test_company_exists():
+	"""Ensure _Test Company exists for compatibility with ERPNext test records."""
+	if not frappe.db.exists("Company", "_Test Company"):
+		try:
+			from frappe.desk.page.setup_wizard.setup_wizard import setup_complete
+			from frappe.utils.data import now_datetime
+
+			current_year = now_datetime().year
+			setup_complete(
+				{
+					"currency": "INR",
+					"full_name": "Test User",
+					"company_name": "_Test Company",
+					"timezone": "Asia/Kolkata",
+					"company_abbr": "_TC",
+					"industry": "Manufacturing",
+					"country": "India",
+					"fy_start_date": f"{current_year}-01-01",
+					"fy_end_date": f"{current_year}-12-31",
+					"language": "English",
+					"company_tagline": "Testing",
+					"email": "test@example.com",
+					"password": "test",
+					"chart_of_accounts": "Standard",
+				}
+			)
+			frappe.db.commit()
+		except Exception as exc:
+			# Log but don't fail - this is a compatibility measure
+			frappe.log_error(
+				message=f"Failed to create _Test Company: {exc}",
+				title="Gate Entry Test Setup - _Test Company",
+			)
 
 
 def set_default_settings_for_tests():
