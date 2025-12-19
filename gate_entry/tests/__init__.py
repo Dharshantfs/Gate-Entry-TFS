@@ -38,7 +38,7 @@ def before_tests():
 				"fy_end_date": f"{year + 1}-03-31",
 				"language": "English",
 				"company_tagline": "Testing",
-				"email": "test@example.com",
+				"email": "test-wp@example.com",
 				"password": "test",
 				"chart_of_accounts": "Standard",
 				"company_gstin": "24AAQCA8719H1ZA",
