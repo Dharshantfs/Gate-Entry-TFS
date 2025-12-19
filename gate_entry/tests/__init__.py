@@ -12,7 +12,6 @@ from frappe.utils.nestedset import get_root_of
 
 
 def before_tests():
-	return
 	"""Set up test environment for Gate Entry module."""
 	frappe.clear_cache()
 
