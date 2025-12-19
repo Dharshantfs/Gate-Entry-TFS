@@ -21,7 +21,7 @@ def before_tests():
 
 	# Set up company if it doesn't exist
 	company_name = "Wind Power LLP"
-	if not frappe.db.a_row_exists("Company"):
+	if not frappe.db.exists("Company", company_name):
 		today = getdate()
 		year = today.year if today.month > 3 else today.year - 1
 
