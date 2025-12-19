@@ -93,23 +93,22 @@ def create_test_records():
 def set_default_company_for_tests():
 	"""Set default company and configure it for tests."""
 	company_name = "Wind Power LLP"
-	if frappe.db.exists("Company", company_name):
-		# Set default company
-		global_defaults = frappe.get_single("Global Defaults")
-		global_defaults.default_company = company_name
-		global_defaults.save(ignore_permissions=True)
+	# stock settings
+	frappe.db.set_value(
+		"Company",
+		company_name,
+		{
+			"enable_perpetual_inventory": 1,
+			"default_inventory_account": "Stock In Hand - WP",
+			"stock_adjustment_account": "Stock Adjustment - WP",
+			"stock_received_but_not_billed": "Stock Received But Not Billed - WP",
+		},
+	)
 
-		# Configure stock settings for the company
-		frappe.db.set_value(
-			"Company",
-			company_name,
-			{
-				"enable_perpetual_inventory": 1,
-				"default_inventory_account": "Stock In Hand - WP",
-				"stock_adjustment_account": "Stock Adjustment - WP",
-				"stock_received_but_not_billed": "Stock Received But Not Billed - WP",
-			},
-		)
+	# set default company
+	global_defaults = frappe.get_single("Global Defaults")
+	global_defaults.default_company = company_name
+	global_defaults.save()
 
 
 def add_companies_to_fiscal_year(data):
