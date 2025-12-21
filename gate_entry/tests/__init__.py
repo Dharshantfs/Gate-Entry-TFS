@@ -106,12 +106,13 @@ def set_default_settings_for_tests():
 		frappe.db.set_single_value("Stock Settings", "stock_uom", "Nos")
 
 	# Enable Sandbox Mode in GST Settings (if india_compliance app is installed)
-	try:
-		if frappe.db.exists("GST Settings"):
+	# Check if GST Settings doctype exists (India Compliance app might not be installed)
+	if frappe.db.exists("DocType", "GST Settings"):
+		try:
 			frappe.db.set_single_value("GST Settings", "sandbox_mode", 1)
-	except frappe.exceptions.DoesNotExistError:
-		# GST Settings doctype doesn't exist (india_compliance app not installed)
-		pass
+		except Exception:
+			# Handle cases where GST Settings document doesn't exist or other errors
+			pass
 
 
 def create_test_records():
