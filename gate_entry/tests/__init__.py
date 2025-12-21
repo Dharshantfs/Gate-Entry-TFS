@@ -47,8 +47,8 @@ def before_tests():
 			}
 		)
 	set_default_settings_for_tests()
-	ensure_warehouses_exist()
 	create_test_records()
+	ensure_warehouses_exist()
 	set_default_company_for_tests()
 	frappe.db.commit()
 	frappe.clear_cache()
