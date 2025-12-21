@@ -15,8 +15,13 @@ def before_tests():
 	"""Set up test environment for Gate Entry module."""
 	frappe.clear_cache()
 
+	# Ensure _Test Company exists (required by ERPNext and other test records)
+	# This must be created early as compat_preload_test_records_upfront may run before before_tests()
+	ensure_test_company_exists()
+
 	# Set up company if it doesn't exist
-	if not frappe.db.a_row_exists("Company"):
+	company_name = "Wind Power LLP"
+	if not frappe.db.exists("Company", company_name):
 		today = getdate()
 		year = today.year if today.month > 3 else today.year - 1
 
@@ -24,7 +29,7 @@ def before_tests():
 			{
 				"currency": "INR",
 				"full_name": "Test User",
-				"company_name": "Wind Power LLP",
+				"company_name": company_name,
 				"timezone": "Asia/Kolkata",
 				"company_abbr": "WP",
 				"industry": "Manufacturing",
@@ -33,53 +38,58 @@ def before_tests():
 				"fy_end_date": f"{year + 1}-03-31",
 				"language": "English",
 				"company_tagline": "Testing",
-				"email": "test@example.com",
+				"email": "test-wp@example.com",
 				"password": "test",
 				"chart_of_accounts": "Standard",
+				"company_gstin": "24AAQCA8719H1ZA",
+				"default_gst_rate": "18.0",
+				"enable_audit_trail": 0,
 			}
 		)
-
-	# Enable all roles for admin (like ERPNext does)
-	_enable_all_roles_for_admin()
-
 	set_default_settings_for_tests()
 	create_test_records()
-	set_default_company_for_tests()
 	ensure_warehouses_exist()
+	set_default_company_for_tests()
 	frappe.db.commit()
+	frappe.clear_cache()
+	frappe.flags.country = "India"
 	frappe.flags.skip_test_records = True
 	frappe.enqueue = partial(frappe.enqueue, now=True)
 
 
-def add_companies_to_fiscal_year(data):
-	fy = get_fiscal_year(getdate(), as_dict=True)
-	doc = frappe.get_doc("Fiscal Year", fy.name)
-	fy_companies = [row.company for row in doc.companies]
+def ensure_test_company_exists():
+	"""Ensure _Test Company exists for compatibility with ERPNext test records."""
+	if not frappe.db.exists("Company", "_Test Company"):
+		try:
+			from frappe.desk.page.setup_wizard.setup_wizard import setup_complete
+			from frappe.utils.data import now_datetime
 
-	for company in data:
-		if (company_name := company["company_name"]) not in fy_companies:
-			doc.append("companies", {"company": company_name})
-
-	doc.save(ignore_permissions=True)
-
-
-def _enable_all_roles_for_admin():
-	"""Enable all roles for Administrator user (like ERPNext does)."""
-	try:
-		from frappe.desk.page.setup_wizard.setup_wizard import add_all_roles_to
-
-		all_roles = set(frappe.db.get_values("Role", pluck="name"))
-		admin_roles = set(
-			frappe.db.get_values("Has Role", {"parent": "Administrator"}, fieldname="role", pluck="role")
-		)
-
-		if all_roles.difference(admin_roles):
-			add_all_roles_to("Administrator")
-	except Exception as exc:
-		frappe.log_error(
-			message=f"Failed to enable all roles for admin: {exc}",
-			title="Gate Entry Test Setup - Roles",
-		)
+			current_year = now_datetime().year
+			setup_complete(
+				{
+					"currency": "INR",
+					"full_name": "Test User",
+					"company_name": "_Test Company",
+					"timezone": "Asia/Kolkata",
+					"company_abbr": "_TC",
+					"industry": "Manufacturing",
+					"country": "India",
+					"fy_start_date": f"{current_year}-01-01",
+					"fy_end_date": f"{current_year}-12-31",
+					"language": "English",
+					"company_tagline": "Testing",
+					"email": "test@example.com",
+					"password": "test",
+					"chart_of_accounts": "Standard",
+				}
+			)
+			frappe.db.commit()
+		except Exception as exc:
+			# Log but don't fail - this is a compatibility measure
+			frappe.log_error(
+				message=f"Failed to create _Test Company: {exc}",
+				title="Gate Entry Test Setup - _Test Company",
+			)
 
 
 def set_default_settings_for_tests():
@@ -95,9 +105,14 @@ def set_default_settings_for_tests():
 	if frappe.db.exists("UOM", "Nos"):
 		frappe.db.set_single_value("Stock Settings", "stock_uom", "Nos")
 
-	# Enable Sandbox Mode in GST Settings
-	if frappe.db.exists("GST Settings"):
-		frappe.db.set_single_value("GST Settings", "sandbox_mode", 1)
+	# Enable Sandbox Mode in GST Settings (if india_compliance app is installed)
+	# Check if GST Settings doctype exists (India Compliance app might not be installed)
+	if frappe.db.exists("DocType", "GST Settings"):
+		try:
+			frappe.db.set_single_value("GST Settings", "sandbox_mode", 1)
+		except Exception:
+			# Handle cases where GST Settings document doesn't exist or other errors
+			pass
 
 
 def create_test_records():
@@ -117,28 +132,6 @@ def create_test_records():
 		frappe.log_error(
 			message=f"Failed to create test records: {exc}",
 			title="Gate Entry Test Setup - Test Records",
-		)
-
-
-def set_default_company_for_tests():
-	"""Set default company and configure it for tests."""
-	company_name = "Wind Power LLP"
-	if frappe.db.exists("Company", company_name):
-		# Set default company
-		global_defaults = frappe.get_single("Global Defaults")
-		global_defaults.default_company = company_name
-		global_defaults.save()
-
-		# Configure stock settings for the company
-		frappe.db.set_value(
-			"Company",
-			company_name,
-			{
-				"enable_perpetual_inventory": 1,
-				"default_inventory_account": "Stock In Hand - WP",
-				"stock_adjustment_account": "Stock Adjustment - WP",
-				"stock_received_but_not_billed": "Stock Received But Not Billed - WP",
-			},
 		)
 
 
@@ -164,9 +157,7 @@ def ensure_warehouses_exist():
 		# If no warehouses exist, trigger company.on_update() to create default warehouses
 		if not existing_warehouses:
 			company.flags.ignore_validate = True
-			company.save()
-			frappe.db.commit()
-			frappe.clear_cache()
+			company.save(ignore_permissions=True)
 
 		# Verify warehouses exist, create if missing
 		required_warehouses = [
@@ -194,12 +185,8 @@ def ensure_warehouses_exist():
 			)
 			parent_wh.flags.ignore_permissions = True
 			parent_wh.flags.ignore_mandatory = True
-			parent_wh.insert()
+			parent_wh.insert(ignore_permissions=True)
 			parent_warehouse = parent_wh.name
-			frappe.db.commit()
-
-		# Create missing warehouses
-		warehouses_created = False
 		for wh_info in required_warehouses:
 			warehouse_full_name = f"{wh_info['name']} - {company_abbr}"
 			# Check by full name (with abbreviation) first
@@ -220,12 +207,8 @@ def ensure_warehouses_exist():
 					)
 					warehouse.flags.ignore_permissions = True
 					warehouse.flags.ignore_mandatory = True
-					warehouse.insert()
-					warehouses_created = True
+					warehouse.insert(ignore_permissions=True)
 
-		if warehouses_created:
-			frappe.db.commit()
-			frappe.clear_cache()
 	except Exception as exc:
 		frappe.log_error(
 			message=f"Failed to ensure warehouses exist: {exc}",
@@ -233,3 +216,37 @@ def ensure_warehouses_exist():
 		)
 		# Re-raise to make test failures visible
 		raise
+
+
+def set_default_company_for_tests():
+	"""Set default company and configure it for tests."""
+	company_name = "Wind Power LLP"
+	if frappe.db.exists("Company", company_name):
+		# stock settings
+		frappe.db.set_value(
+			"Company",
+			company_name,
+			{
+				"enable_perpetual_inventory": 1,
+				"default_inventory_account": "Stock In Hand - WP",
+				"stock_adjustment_account": "Stock Adjustment - WP",
+				"stock_received_but_not_billed": "Stock Received But Not Billed - WP",
+			},
+		)
+
+		# set default company
+		global_defaults = frappe.get_single("Global Defaults")
+		global_defaults.default_company = company_name
+		global_defaults.save(ignore_permissions=True)
+
+
+def add_companies_to_fiscal_year(data):
+	fy = get_fiscal_year(getdate(), as_dict=True)
+	doc = frappe.get_doc("Fiscal Year", fy.name)
+	fy_companies = [row.company for row in doc.companies]
+
+	for company in data:
+		if (company_name := company["company_name"]) not in fy_companies:
+			doc.append("companies", {"company": company_name})
+
+	doc.save(ignore_permissions=True)
