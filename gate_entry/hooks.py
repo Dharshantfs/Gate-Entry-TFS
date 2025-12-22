@@ -2,7 +2,7 @@ app_name = "gate_entry"
 app_title = "Gate Entry"
 app_publisher = "Gurudatt Kulkarni"
 app_description = "An erpnext security gate module for recording material and people movement"
-app_email = "abcd@example.com"
+app_email = "connect@gurudatt.in"
 app_license = "mit"
 
 # Apps
