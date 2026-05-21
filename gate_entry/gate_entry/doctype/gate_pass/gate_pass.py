@@ -906,22 +906,24 @@ class GatePass(Document):
 					)
 				)
 
-			issue_se.append(
-				"items",
-				{
-					"item_code": gp_item.item_code,
-					"item_name": gp_item.item_name,
-					"qty": received_qty,
-					"uom": gp_item.uom or ob_row.uom,
-					"stock_uom": gp_item.stock_uom or ob_row.stock_uom,
-					"conversion_factor": flt(gp_item.conversion_factor) or 1.0,
-					"s_warehouse": transit_wh,
-					"batch_no": self._resolve_batch_no(gp_item, ob_row),
-					"basic_rate": flt(gp_item.rate) or flt(ob_row.basic_rate),
-					"cost_center": ob_row.cost_center,
-					"project": ob_row.project,
-				},
-			)
+			# Resolve batch from all possible sources
+			batch_no = self._resolve_batch_no(gp_item, ob_row)
+
+			# Build the item dict, handling both old-style batch_no and v14+ bundle
+			issue_item = {
+				"item_code": gp_item.item_code,
+				"item_name": gp_item.item_name,
+				"qty": received_qty,
+				"uom": gp_item.uom or ob_row.uom,
+				"stock_uom": gp_item.stock_uom or ob_row.stock_uom,
+				"conversion_factor": flt(gp_item.conversion_factor) or 1.0,
+				"s_warehouse": transit_wh,
+				"basic_rate": flt(gp_item.rate) or flt(ob_row.basic_rate),
+				"cost_center": ob_row.cost_center,
+				"project": ob_row.project,
+			}
+			self._apply_batch_to_item(issue_item, gp_item.item_code, transit_wh, batch_no, received_qty, src_company, "Outward")
+			issue_se.append("items", issue_item)
 
 		if not issue_se.items:
 			frappe.throw(_("No items with received quantity found on Gate Pass {0}").format(self.name))
@@ -990,22 +992,21 @@ class GatePass(Document):
 			if batch_no:
 				self.ensure_batch_exists(batch_no, gp_item.item_code)
 
-			receipt_se.append(
-				"items",
-				{
-					"item_code": gp_item.item_code,
-					"item_name": gp_item.item_name,
-					"qty": received_qty,
-					"uom": gp_item.uom or (ob_row.uom if ob_row else None),
-					"stock_uom": gp_item.stock_uom or (ob_row.stock_uom if ob_row else None),
-					"conversion_factor": flt(gp_item.conversion_factor) or 1.0,
-					"t_warehouse": dest_wh,
-					"batch_no": batch_no,
-					"basic_rate": flt(gp_item.rate) or (flt(ob_row.basic_rate) if ob_row else 0),
-					"cost_center": ob_row.cost_center if ob_row else None,
-					"project": ob_row.project if ob_row else None,
-				},
-			)
+			# Build receipt item, handling old-style batch_no and v14+ bundle
+			receipt_item = {
+				"item_code": gp_item.item_code,
+				"item_name": gp_item.item_name,
+				"qty": received_qty,
+				"uom": gp_item.uom or (ob_row.uom if ob_row else None),
+				"stock_uom": gp_item.stock_uom or (ob_row.stock_uom if ob_row else None),
+				"conversion_factor": flt(gp_item.conversion_factor) or 1.0,
+				"t_warehouse": dest_wh,
+				"basic_rate": flt(gp_item.rate) or (flt(ob_row.basic_rate) if ob_row else 0),
+				"cost_center": ob_row.cost_center if ob_row else None,
+				"project": ob_row.project if ob_row else None,
+			}
+			self._apply_batch_to_item(receipt_item, gp_item.item_code, dest_wh, batch_no, received_qty, dst_company, "Inward")
+			receipt_se.append("items", receipt_item)
 
 		if not receipt_se.items:
 			frappe.throw(_("No items to receive for Gate Pass {0}").format(self.name))
@@ -1026,6 +1027,60 @@ class GatePass(Document):
 			title=_("Inter-Company Transfer Complete"),
 			indicator="green",
 		)
+
+	def _apply_batch_to_item(self, item_dict, item_code, warehouse, batch_no, qty, company, transaction_type):
+		"""
+		Apply batch tracking to a stock entry item dict.
+		Detects ERPNext version:
+		  - Old style (v13 / use_serial_batch_fields=1): sets batch_no directly
+		  - New style (v14+ bundle mode): creates Serial and Batch Bundle doc
+		"""
+		if not batch_no:
+			return  # Item is not batch-tracked or batch not found
+
+		# Detect whether we should use old-style batch_no or new-style bundle.
+		# Stock Settings 'use_serial_batch_fields' = 1 means old style is still active.
+		use_old_style = True
+		try:
+			use_sbb = frappe.db.get_single_value("Stock Settings", "use_serial_batch_fields")
+			# If use_serial_batch_fields = 1 → old style. If 0 or missing → bundle mode.
+			use_old_style = cint(use_sbb) == 1
+		except Exception:
+			use_old_style = True  # Default to old style if setting doesn't exist (v13)
+
+		if use_old_style:
+			# Old ERPNext: set batch_no directly on the item
+			item_dict["batch_no"] = batch_no
+			return
+
+		# New ERPNext v14+ bundle mode: create a Serial and Batch Bundle
+		try:
+			self.ensure_batch_exists(batch_no, item_code)
+			bundle = frappe.new_doc("Serial and Batch Bundle")
+			bundle.item_code = item_code
+			bundle.warehouse = warehouse
+			bundle.voucher_type = "Stock Entry"
+			bundle.type_of_transaction = transaction_type  # "Inward" or "Outward"
+			bundle.company = company
+			bundle.has_batch_no = 1
+			bundle.has_serial_no = 0
+			# Outward qty is negative, Inward is positive
+			entry_qty = -abs(flt(qty)) if transaction_type == "Outward" else abs(flt(qty))
+			bundle.append("entries", {
+				"batch_no": batch_no,
+				"qty": entry_qty,
+			})
+			bundle.flags.ignore_permissions = True
+			bundle.flags.ignore_mandatory = True
+			bundle.insert()
+			item_dict["serial_and_batch_bundle"] = bundle.name
+		except Exception as e:
+			# If bundle creation fails, fall back to direct batch_no as last resort
+			frappe.log_error(
+				message=frappe.get_traceback(),
+				title=f"Serial/Batch Bundle creation failed for {item_code} – falling back to batch_no",
+			)
+			item_dict["batch_no"] = batch_no
 
 	def _resolve_batch_no(self, gp_item, ob_row=None):
 		"""
