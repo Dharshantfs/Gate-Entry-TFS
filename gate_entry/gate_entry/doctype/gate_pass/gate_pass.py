@@ -951,9 +951,30 @@ class GatePass(Document):
 
 			if not dest_wh:
 				frappe.throw(
-					_("Please set a warehouse for item {0} in Gate Pass {1}").format(
-						gp_item.item_code, self.name
-					)
+					_(
+						"No destination warehouse configured for company {0}. "
+						"Please set a warehouse in the Gate Pass item row, or add it to the "
+						"INTERCOMPANY_DEST_WAREHOUSE_MAP in gate_pass.py."
+					).format(dst_company)
+				)
+
+			# Validate the warehouse actually exists in the system
+			if not frappe.db.exists("Warehouse", dest_wh):
+				# Try fetching warehouses for dst_company to give a helpful hint
+				available = frappe.get_all(
+					"Warehouse",
+					filters={"company": dst_company, "is_group": 0},
+					pluck="name",
+					limit=5,
+				)
+				hint = (_(", ").join(available)) if available else _("(none found)")
+				frappe.throw(
+					_(
+						"Warehouse <b>{0}</b> does not exist in this system.<br>"
+						"Available warehouses for {1}: {2}<br><br>"
+						"Please create the warehouse first or update the INTERCOMPANY_DEST_WAREHOUSE_MAP "
+						"in gate_pass.py with the correct warehouse name."
+					).format(dest_wh, dst_company, hint)
 				)
 
 			batch_no = gp_item.batch_no or (ob_row.get("batch_no") if ob_row else None)

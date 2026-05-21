@@ -523,16 +523,15 @@ function set_gate_pass_items(frm, items) {
 	frm.clear_table("gate_pass_table");
 	// fetch the value of manual_return_flow
 	const is_return_flow = parseInt(frm.doc.manual_return_flow || 0) === 1;
-	console.log("Is return flow: ", is_return_flow);
 
-	// For inter-company Gate In, override warehouse with destination mapping
+	// For inter-company Gate In (e.g. JVE receiving from JSB), clear the source
+	// warehouse so we don't accidentally set a JSB warehouse on a JVE gate pass.
+	// The gate_pass_table warehouse is a Link field — setting an invalid name crashes.
+	// The Python on_submit will use INTERCOMPANY_DEST_WAREHOUSE_MAP to fill it.
 	const is_intercompany_gate_in =
 		frm.doc.entry_type === "Gate In" &&
 		frm.doc.document_reference === "Stock Entry" &&
 		INTERCOMPANY_WAREHOUSE_MAP[frm.doc.company];
-	const intercompany_dest_wh = is_intercompany_gate_in
-		? INTERCOMPANY_WAREHOUSE_MAP[frm.doc.company]
-		: null;
 
 	(items || []).forEach((item) => {
 		const row = frm.add_child("gate_pass_table");
@@ -544,8 +543,14 @@ function set_gate_pass_items(frm, items) {
 		row.stock_uom = item.stock_uom || "";
 		row.conversion_factor = item.conversion_factor || 1.0;
 		row.ordered_qty = item.ordered_qty || 0;
-		row.received_qty = is_return_flow ? item.received_qty : 0;
-		row.dispatched_qty = item.dispatched_qty || 0;
+		// For inter-company Gate In pre-fill received_qty = ordered_qty
+		// so guard sees what was dispatched; they can reduce if short-received.
+		if (is_intercompany_gate_in) {
+			row.received_qty = item.ordered_qty || 0;
+		} else {
+			row.received_qty = is_return_flow ? item.received_qty : 0;
+		}
+		row.dispatched_qty = item.dispatched_qty || item.ordered_qty || 0;
 		row.pending_qty = item.pending_qty || 0;
 		row.is_rate_contract = item.is_rate_contract || 0;
 		row.rate = item.rate || 0;
@@ -556,8 +561,10 @@ function set_gate_pass_items(frm, items) {
 			? item.dispatched_qty || 0
 			: item.received_qty || 0;
 		row.amount = qty_for_amount * (item.rate || 0);
-		// Use mapped destination warehouse for inter-company Gate In; else use item's warehouse
-		row.warehouse = intercompany_dest_wh || item.warehouse || "";
+		// For inter-company Gate In: clear warehouse (avoid Link field validation crash).
+		// Guard can leave blank; Python on_submit fills it from INTERCOMPANY_DEST_WAREHOUSE_MAP.
+		// For same-company: use the warehouse from reference document.
+		row.warehouse = is_intercompany_gate_in ? "" : (item.warehouse || "");
 		row.rejected_warehouse = item.rejected_warehouse || "";
 		row.expense_account = item.expense_account || "";
 		row.cost_center = item.cost_center || "";
@@ -574,12 +581,11 @@ function set_gate_pass_items(frm, items) {
 		frm.gate_pass_ui.refresh();
 	}
 
-	// Notify user if warehouse was auto-set
-	if (intercompany_dest_wh) {
+	// Inform user that received qty is pre-filled from dispatched qty
+	if (is_intercompany_gate_in) {
 		frappe.show_alert({
 			message: __(
-				"Warehouse auto-set to {0} for all items (inter-company transfer)",
-				[intercompany_dest_wh]
+				"Received Qty pre-filled from dispatched quantity. Adjust if any shortage."
 			),
 			indicator: "blue",
 		});
