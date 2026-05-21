@@ -521,10 +521,21 @@ function set_gate_pass_items(frm, items) {
 	// fetch the value of manual_return_flow
 	const is_return_flow = parseInt(frm.doc.manual_return_flow || 0) === 1;
 	console.log("Is return flow: ", is_return_flow);
+
+	// For inter-company Gate In, override warehouse with destination mapping
+	const is_intercompany_gate_in =
+		frm.doc.entry_type === "Gate In" &&
+		frm.doc.document_reference === "Stock Entry" &&
+		INTERCOMPANY_WAREHOUSE_MAP[frm.doc.company];
+	const intercompany_dest_wh = is_intercompany_gate_in
+		? INTERCOMPANY_WAREHOUSE_MAP[frm.doc.company]
+		: null;
+
 	(items || []).forEach((item) => {
 		const row = frm.add_child("gate_pass_table");
 		row.item_code = item.item_code;
 		row.item_name = item.item_name || "";
+		row.batch_no = item.batch_no || "";
 		row.description = item.description || "";
 		row.uom = item.uom || "";
 		row.stock_uom = item.stock_uom || "";
@@ -542,7 +553,8 @@ function set_gate_pass_items(frm, items) {
 			? item.dispatched_qty || 0
 			: item.received_qty || 0;
 		row.amount = qty_for_amount * (item.rate || 0);
-		row.warehouse = item.warehouse || "";
+		// Use mapped destination warehouse for inter-company Gate In; else use item's warehouse
+		row.warehouse = intercompany_dest_wh || item.warehouse || "";
 		row.rejected_warehouse = item.rejected_warehouse || "";
 		row.expense_account = item.expense_account || "";
 		row.cost_center = item.cost_center || "";
@@ -557,6 +569,17 @@ function set_gate_pass_items(frm, items) {
 
 	if (frm.gate_pass_ui) {
 		frm.gate_pass_ui.refresh();
+	}
+
+	// Notify user if warehouse was auto-set
+	if (intercompany_dest_wh) {
+		frappe.show_alert({
+			message: __(
+				"Warehouse auto-set to {0} for all items (inter-company transfer)",
+				[intercompany_dest_wh]
+			),
+			indicator: "blue",
+		});
 	}
 }
 
