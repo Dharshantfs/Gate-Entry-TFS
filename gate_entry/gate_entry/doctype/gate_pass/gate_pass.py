@@ -1029,32 +1029,88 @@ class GatePass(Document):
 
 	def _resolve_batch_no(self, gp_item, ob_row=None):
 		"""
-		Resolve batch_no for an inter-company stock entry item using 3 fallback levels:
-		  1. gate pass item's own batch_no field (set during Gate Pass creation)
-		  2. the matched outbound Stock Entry row's batch_no
-		  3. direct DB query on Stock Entry Detail by parent + item_code
-		     (handles gate passes created before batch_no field was deployed)
+		Resolve batch_no using 5 fallback levels to cover all ERPNext versions:
+		  1. Gate Pass item's own batch_no field
+		  2. Outbound SE row's batch_no (direct field)
+		  2b. Outbound SE row's serial_and_batch_bundle (ERPNext v14+)
+		  3. Direct DB query on Stock Entry Detail batch_no field
+		  3b. Stock Entry Detail's serial_and_batch_bundle (ERPNext v14+)
+		  4. Stock Ledger Entry for the transit warehouse (most reliable fallback)
 		"""
 		# Level 1: gate pass item itself
 		batch_no = gp_item.batch_no
 		if batch_no:
 			return batch_no
 
-		# Level 2: matched outbound SE row
+		# Level 2: matched outbound SE row — direct batch_no field
 		if ob_row:
 			batch_no = ob_row.batch_no or ob_row.get("batch_no")
 			if batch_no:
 				return batch_no
 
-		# Level 3: direct DB fallback — query Stock Entry Detail
+			# Level 2b: serial_and_batch_bundle (ERPNext v14+)
+			bundle = ob_row.get("serial_and_batch_bundle")
+			if bundle:
+				batch_no = frappe.db.get_value(
+					"Serial and Batch Entry",
+					{"parent": bundle},
+					"batch_no",
+				)
+				if batch_no:
+					return batch_no
+
+		# Level 3: direct DB on Stock Entry Detail
 		if self.reference_number and gp_item.item_code:
-			batch_no = frappe.db.get_value(
+			row = frappe.db.get_value(
 				"Stock Entry Detail",
 				{"parent": self.reference_number, "item_code": gp_item.item_code},
-				"batch_no",
+				["batch_no", "serial_and_batch_bundle"],
+				as_dict=True,
 			)
-			if batch_no:
-				return batch_no
+			if row:
+				if row.get("batch_no"):
+					return row["batch_no"]
+				# Level 3b: bundle in Stock Entry Detail (ERPNext v14+)
+				if row.get("serial_and_batch_bundle"):
+					batch_no = frappe.db.get_value(
+						"Serial and Batch Entry",
+						{"parent": row["serial_and_batch_bundle"]},
+						"batch_no",
+					)
+					if batch_no:
+						return batch_no
+
+		# Level 4: Stock Ledger Entry for transit warehouse — most reliable
+		# Query what batch is actually sitting in the transit warehouse right now
+		if gp_item.item_code and self.reference_number:
+			try:
+				# Get transit warehouse from outbound SE item if available
+				transit_wh = ob_row.t_warehouse if ob_row else None
+				if transit_wh:
+					sle = frappe.db.get_value(
+						"Stock Ledger Entry",
+						{
+							"item_code": gp_item.item_code,
+							"warehouse": transit_wh,
+							"voucher_no": self.reference_number,
+							"is_cancelled": 0,
+						},
+						["batch_no", "serial_and_batch_bundle"],
+						as_dict=True,
+					)
+					if sle:
+						if sle.get("batch_no"):
+							return sle["batch_no"]
+						if sle.get("serial_and_batch_bundle"):
+							batch_no = frappe.db.get_value(
+								"Serial and Batch Entry",
+								{"parent": sle["serial_and_batch_bundle"]},
+								"batch_no",
+							)
+							if batch_no:
+								return batch_no
+			except Exception:
+				pass
 
 		return None
 
@@ -1234,6 +1290,58 @@ class GatePass(Document):
 		message += _("4. Create a new receipt from the new Gate Pass")
 
 		frappe.throw(message, title=_("Cannot Amend Gate Pass"))
+
+
+@frappe.whitelist()
+def get_stock_entry_batches(stock_entry_name, item_code):
+	"""
+	Return all batch/roll numbers for a given item in a Stock Entry.
+	Supports both old-style (batch_no on Stock Entry Detail) and
+	ERPNext v14+ (serial_and_batch_bundle → Serial and Batch Entry).
+
+	Used by the Gate Pass info-button popup so the security guard can
+	verify which roll/batch numbers are physically being transferred.
+	"""
+	if not stock_entry_name or not item_code:
+		return []
+
+	rows = frappe.get_all(
+		"Stock Entry Detail",
+		filters={"parent": stock_entry_name, "item_code": item_code},
+		fields=["name", "batch_no", "qty", "uom", "stock_uom", "serial_and_batch_bundle"],
+		order_by="idx asc",
+	)
+
+	batches = []
+	for row in rows:
+		if row.get("batch_no"):
+			# Old-style: batch_no directly on the row
+			expiry = frappe.db.get_value("Batch", row.batch_no, "expiry_date")
+			batches.append({
+				"batch_no": row.batch_no,
+				"qty": flt(row.qty),
+				"uom": row.uom or row.stock_uom,
+				"expiry_date": str(expiry) if expiry else None,
+			})
+		elif row.get("serial_and_batch_bundle"):
+			# ERPNext v14+ style: look inside the bundle
+			bundle_entries = frappe.get_all(
+				"Serial and Batch Entry",
+				filters={"parent": row.serial_and_batch_bundle},
+				fields=["batch_no", "qty"],
+				order_by="idx asc",
+			)
+			for be in bundle_entries:
+				if be.get("batch_no"):
+					expiry = frappe.db.get_value("Batch", be.batch_no, "expiry_date")
+					batches.append({
+						"batch_no": be.batch_no,
+						"qty": abs(flt(be.qty)),
+						"uom": row.uom or row.stock_uom,
+						"expiry_date": str(expiry) if expiry else None,
+					})
+
+	return batches
 
 
 @frappe.whitelist()
