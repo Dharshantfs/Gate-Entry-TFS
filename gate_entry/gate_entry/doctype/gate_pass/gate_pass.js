@@ -147,7 +147,10 @@ frappe.ui.form.on("Gate Pass", {
 
 		// Update entry type locally for better UX
 		if (frm.doc.document_reference === STOCK_ENTRY_REFERENCE) {
-			frm.set_value("entry_type", "Gate Out");
+			// If the selected company is a known inter-company RECEIVER (e.g. JVE receiving from JSB),
+			// default entry_type to Gate In. Otherwise default to Gate Out (sender side).
+			const is_intercompany_receiver = !!INTERCOMPANY_WAREHOUSE_MAP[frm.doc.company];
+			frm.set_value("entry_type", is_intercompany_receiver ? "Gate In" : "Gate Out");
 			frm.set_value("supplier", null);
 			frm.set_value("supplier_delivery_note", null);
 		} else if (is_outbound_reference(frm.doc.document_reference, "Gate Out")) {

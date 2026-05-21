@@ -760,9 +760,11 @@ class GatePass(Document):
 	def ensure_company_matches_reference(self, reference_doc):
 		"""
 		Ensure Gate Pass company aligns with reference document.
-		For inter-company Gate In (Stock Entry), we allow the Gate Pass
-		company to differ from the reference so that JVE can receive
-		goods originally dispatched under JSB.
+		For Stock Entry references we always skip the company-match check
+		because both same-company and inter-company transfers are valid:
+		  - Same company (JSB Gate Out): company will match naturally.
+		  - Inter-company (JVE Gate In receives JSB goods): company differs
+		    intentionally – enforcing a match would break the cross-company flow.
 		"""
 		if not reference_doc or not hasattr(reference_doc, "company"):
 			return
@@ -771,11 +773,12 @@ class GatePass(Document):
 		if not reference_company:
 			return
 
-		# Allow inter-company Gate In on Stock Entry (cross-company transfer scenario)
-		if self.entry_type == "Gate In" and self.document_reference == "Stock Entry":
+		# For Stock Entry references, skip company validation entirely.
+		# Inter-company transfers intentionally cross company boundaries.
+		if self.document_reference == "Stock Entry":
 			if not self.company:
 				self.company = reference_company
-			return  # Skip mismatch check – companies may intentionally differ
+			return  # ← do NOT throw for Stock Entry regardless of entry_type
 
 		if not self.company:
 			self.company = reference_company
