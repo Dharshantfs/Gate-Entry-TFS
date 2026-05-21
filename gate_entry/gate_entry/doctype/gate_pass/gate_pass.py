@@ -916,7 +916,7 @@ class GatePass(Document):
 					"stock_uom": gp_item.stock_uom or ob_row.stock_uom,
 					"conversion_factor": flt(gp_item.conversion_factor) or 1.0,
 					"s_warehouse": transit_wh,
-					"batch_no": gp_item.batch_no or ob_row.get("batch_no"),
+					"batch_no": self._resolve_batch_no(gp_item, ob_row),
 					"basic_rate": flt(gp_item.rate) or flt(ob_row.basic_rate),
 					"cost_center": ob_row.cost_center,
 					"project": ob_row.project,
@@ -984,7 +984,7 @@ class GatePass(Document):
 					).format(dest_wh, dst_company, hint)
 				)
 
-			batch_no = gp_item.batch_no or (ob_row.get("batch_no") if ob_row else None)
+			batch_no = self._resolve_batch_no(gp_item, ob_row)
 
 			# Auto-create batch in destination company if needed
 			if batch_no:
@@ -1026,6 +1026,37 @@ class GatePass(Document):
 			title=_("Inter-Company Transfer Complete"),
 			indicator="green",
 		)
+
+	def _resolve_batch_no(self, gp_item, ob_row=None):
+		"""
+		Resolve batch_no for an inter-company stock entry item using 3 fallback levels:
+		  1. gate pass item's own batch_no field (set during Gate Pass creation)
+		  2. the matched outbound Stock Entry row's batch_no
+		  3. direct DB query on Stock Entry Detail by parent + item_code
+		     (handles gate passes created before batch_no field was deployed)
+		"""
+		# Level 1: gate pass item itself
+		batch_no = gp_item.batch_no
+		if batch_no:
+			return batch_no
+
+		# Level 2: matched outbound SE row
+		if ob_row:
+			batch_no = ob_row.batch_no or ob_row.get("batch_no")
+			if batch_no:
+				return batch_no
+
+		# Level 3: direct DB fallback — query Stock Entry Detail
+		if self.reference_number and gp_item.item_code:
+			batch_no = frappe.db.get_value(
+				"Stock Entry Detail",
+				{"parent": self.reference_number, "item_code": gp_item.item_code},
+				"batch_no",
+			)
+			if batch_no:
+				return batch_no
+
+		return None
 
 	def ensure_batch_exists(self, batch_no, item_code):
 		"""
