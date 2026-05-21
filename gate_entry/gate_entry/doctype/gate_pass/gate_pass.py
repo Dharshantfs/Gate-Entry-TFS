@@ -957,14 +957,17 @@ class GatePass(Document):
 
 			ob_row = outbound_item_map.get(gp_item.order_item_name)
 
-			# Target warehouse for JVE is taken from the Gate Pass row (editable by guard/user).
-			# Fall back first to the mapped destination warehouse for the receiving company,
-			# then to the outbound SE t_warehouse as a last resort.
+			# Target warehouse for JVE is taken from the Gate Pass row.
+			# But if it's from the wrong company (e.g. copied from source SE), ignore it.
 			dest_wh = gp_item.warehouse
+			if dest_wh:
+				wh_company = frappe.db.get_value("Warehouse", dest_wh, "company")
+				if wh_company != dst_company:
+					dest_wh = None
+
+			# Fall back to the mapped destination warehouse for the receiving company
 			if not dest_wh:
 				dest_wh = INTERCOMPANY_DEST_WAREHOUSE_MAP.get(dst_company)
-			if not dest_wh and ob_row:
-				dest_wh = ob_row.t_warehouse
 
 			if not dest_wh:
 				frappe.throw(
