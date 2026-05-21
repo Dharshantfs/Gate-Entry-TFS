@@ -153,39 +153,71 @@ def create_gate_pass_from_stock_entry(stock_entry_name: str, enqueued_by: str | 
 			frappe.db.commit()  # nosemgrep
 			return
 
-	existing_gate_passes = frappe.get_all(
-		"Gate Pass",
-		filters={"document_reference": "Stock Entry", "reference_number": stock_entry.name},
-		pluck="name",
-	)
+	# --- Check for existing Gate Pass for this company (allow one per company) ---
+	def has_existing_gate_pass(company):
+		return bool(
+			frappe.get_all(
+				"Gate Pass",
+				filters={
+					"document_reference": "Stock Entry",
+					"reference_number": stock_entry.name,
+					"company": company,
+				},
+				pluck="name",
+			)
+		)
 
-	if existing_gate_passes:
-		return
+	# --- Create outbound Gate Pass for the stock entry's own company (e.g. JSB) ---
+	if not has_existing_gate_pass(stock_entry.company):
+		gate_pass = frappe.new_doc("Gate Pass")
+		gate_pass.document_reference = "Stock Entry"
+		gate_pass.reference_number = stock_entry.name
+		gate_pass.company = stock_entry.company
+		gate_pass.vehicle_number = stock_entry.vehicle_no or ""
+		gate_pass.driver_name = ""
+		gate_pass.driver_contact = ""
+		gate_pass.stock_entry = stock_entry.name
 
-	gate_pass = frappe.new_doc("Gate Pass")
-	gate_pass.document_reference = "Stock Entry"
-	gate_pass.reference_number = stock_entry.name
-	gate_pass.company = stock_entry.company
-	gate_pass.vehicle_number = stock_entry.vehicle_no or ""
-	gate_pass.driver_name = ""
-	gate_pass.driver_contact = ""
-	gate_pass.entry_type = "Gate Out"
-	gate_pass.stock_entry = stock_entry.name
+		if is_return:
+			gate_pass.entry_type = "Gate In"
+			gate_pass.return_material_transfer = stock_entry.name
+			gate_pass.outbound_material_transfer = stock_entry.return_against
+			gate_pass.manual_return_flow = 0
+		else:
+			gate_pass.entry_type = "Gate Out"
 
-	if is_return:
-		gate_pass.entry_type = "Gate In"
-		gate_pass.return_material_transfer = stock_entry.name
-		gate_pass.outbound_material_transfer = stock_entry.return_against
-		gate_pass.manual_return_flow = 0
-	elif is_material_transfer(stock_entry) or is_send_to_subcontractor(stock_entry):
-		gate_pass.entry_type = "Gate Out"
+		gate_pass.populate_gate_pass_items(gate_pass.get_stock_entry_items(stock_entry))
+		gate_pass.insert(ignore_permissions=True)
+		frappe.db.commit()  # nosemgrep
 
-	gate_pass.populate_gate_pass_items(gate_pass.get_stock_entry_items(stock_entry))
-	gate_pass.insert(ignore_permissions=True)
+	# --- Detect inter-company transfer and auto-create Gate In for receiving company ---
+	# When JSB does a Material Transfer targeting a warehouse in another company (JVE),
+	# auto-create a draft Gate In for JVE so the receiving user doesn't have to
+	# manually create it or change the company on the JSB Gate Out pass.
+	if is_material_transfer(stock_entry) and not is_return:
+		# Find the receiving company from the target warehouse
+		receiving_company = None
+		for item in stock_entry.items:
+			if item.t_warehouse:
+				wh_company = frappe.db.get_value("Warehouse", item.t_warehouse, "company")
+				if wh_company and wh_company != stock_entry.company:
+					receiving_company = wh_company
+					break
 
-	# Manual commit required: This function runs in background queue (enqueued)
-	# and needs explicit commit to persist newly created gate pass before returning
-	frappe.db.commit()  # nosemgrep
+		if receiving_company and not has_existing_gate_pass(receiving_company):
+			jve_gp = frappe.new_doc("Gate Pass")
+			jve_gp.document_reference = "Stock Entry"
+			jve_gp.reference_number = stock_entry.name
+			jve_gp.company = receiving_company
+			jve_gp.vehicle_number = stock_entry.vehicle_no or ""
+			jve_gp.driver_name = ""
+			jve_gp.driver_contact = ""
+			jve_gp.stock_entry = stock_entry.name
+			jve_gp.entry_type = "Gate In"
+
+			jve_gp.populate_gate_pass_items(jve_gp.get_stock_entry_items(stock_entry))
+			jve_gp.insert(ignore_permissions=True)
+			frappe.db.commit()  # nosemgrep
 
 
 def cancel_gate_passes_for_stock_entry(stock_entry):

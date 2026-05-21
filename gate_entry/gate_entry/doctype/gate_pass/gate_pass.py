@@ -150,6 +150,10 @@ class GatePass(Document):
 		if stock_utils.is_material_transfer(stock_entry):
 			if stock_utils.is_return_entry(stock_entry):
 				return "Gate In"
+			# Inter-company transfer: if this Gate Pass belongs to the RECEIVING company
+			# (different from the stock entry's company), it must be a Gate In.
+			if self.company and stock_entry.company and self.company != stock_entry.company:
+				return "Gate In"
 			return "Gate Out"
 
 		if stock_utils.is_send_to_subcontractor(stock_entry):
