@@ -74,7 +74,6 @@
    "in_list_view": 1,
    "label": "Entry Type",
    "options": "\nGate In\nGate Out",
-   "read_only": 1,
    "reqd": 1
   },
   {
