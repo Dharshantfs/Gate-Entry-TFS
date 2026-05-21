@@ -17,6 +17,16 @@ from gate_entry.stock_integration import utils as stock_utils
 
 logger = frappe.logger("Gate Pass")
 
+# Inter-company destination warehouse mapping.
+# When a Gate In is submitted under a receiving company, items with no
+# warehouse set on the Gate Pass row will fall back to this warehouse.
+INTERCOMPANY_DEST_WAREHOUSE_MAP = {
+	"J Vasanth Exports": "Finished Goods Warehouse - JVE",
+}
+
+# Transit warehouse on the sending company side (JSB).
+JSB_TRANSIT_WAREHOUSE = "Goods In Transit - JSB-1ZT"
+
 
 class GatePass(Document):
 	def is_outbound_reference(self):
@@ -927,9 +937,12 @@ class GatePass(Document):
 
 			ob_row = outbound_item_map.get(gp_item.order_item_name)
 
-			# Target warehouse for JVE is taken from the Gate Pass row (editable by guard/user)
-			# Fall back to outbound SE t_warehouse if not set
+			# Target warehouse for JVE is taken from the Gate Pass row (editable by guard/user).
+			# Fall back first to the mapped destination warehouse for the receiving company,
+			# then to the outbound SE t_warehouse as a last resort.
 			dest_wh = gp_item.warehouse
+			if not dest_wh:
+				dest_wh = INTERCOMPANY_DEST_WAREHOUSE_MAP.get(dst_company)
 			if not dest_wh and ob_row:
 				dest_wh = ob_row.t_warehouse
 

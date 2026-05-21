@@ -7,6 +7,16 @@ const DOCUMENT_REFERENCES = [
 	...new Set([...INBOUND_REFERENCES, ...OUTBOUND_REFERENCES, STOCK_ENTRY_REFERENCE]),
 ];
 
+// Inter-company warehouse mapping:
+// When a Gate In is switched to a specific receiving company,
+// auto-fill all item warehouses with the mapped destination warehouse.
+const INTERCOMPANY_WAREHOUSE_MAP = {
+	"J Vasanth Exports": "Finished Goods Warehouse - JVE",
+};
+
+// The transit warehouse used by JSB for inter-company transfers
+const JSB_TRANSIT_WAREHOUSE = "Goods In Transit - JSB-1ZT";
+
 frappe.ui.form.on("Gate Pass", {
 	onload_post_render(frm) {
 		// Initialize the custom UI component after form is fully rendered
@@ -212,7 +222,69 @@ frappe.ui.form.on("Gate Pass", {
 		// keep guidance in sync
 		show_stock_entry_guidance(frm);
 	},
+
+	company(frm) {
+		// When the company is changed on a Gate In (inter-company transfer),
+		// auto-set the warehouse for all items to the mapped destination warehouse.
+		auto_set_intercompany_warehouses(frm);
+	},
 });
+
+/**
+ * Auto-fill item warehouses when the Gate Pass company is changed
+ * to a company that has a mapped destination warehouse.
+ */
+function auto_set_intercompany_warehouses(frm) {
+	// Only apply for Gate In on Stock Entry references
+	if (
+		frm.doc.entry_type !== "Gate In" ||
+		frm.doc.document_reference !== STOCK_ENTRY_REFERENCE
+	) {
+		return;
+	}
+
+	const company = frm.doc.company;
+	if (!company) return;
+
+	// Check if the selected company has a mapped destination warehouse
+	const dest_warehouse = INTERCOMPANY_WAREHOUSE_MAP[company];
+	if (!dest_warehouse) return;
+
+	// Update warehouse for every row in the child table
+	const table = frm.doc.gate_pass_table || [];
+	if (!table.length) {
+		if (frm.gate_pass_ui) {
+			// Items may be in the custom UI only – update them there too
+			(frm.gate_pass_ui.items || []).forEach((item) => {
+				item.warehouse = dest_warehouse;
+			});
+			frm.gate_pass_ui.sync_to_child_table();
+			frm.gate_pass_ui.render();
+		}
+		return;
+	}
+
+	table.forEach((row) => {
+		frappe.model.set_value(row.doctype, row.name, "warehouse", dest_warehouse);
+	});
+
+	// Sync warehouse into the custom UI items array as well
+	if (frm.gate_pass_ui) {
+		(frm.gate_pass_ui.items || []).forEach((item) => {
+			item.warehouse = dest_warehouse;
+		});
+		frm.gate_pass_ui.sync_to_child_table();
+		frm.gate_pass_ui.render();
+	}
+
+	frappe.show_alert({
+		message: __(
+			"Warehouse auto-set to {0} for all items",
+			[dest_warehouse]
+		),
+		indicator: "blue",
+	});
+}
 
 /**
  * Setup receipt creation buttons
