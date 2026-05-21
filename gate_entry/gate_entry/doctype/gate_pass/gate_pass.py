@@ -2474,7 +2474,18 @@ def on_stock_entry_submit(doc, method):
 		return
 
 	if utils.is_material_transfer(doc) and not utils.is_external_transfer(doc):
-		return
+		# Even without the External Transfer checkbox, if the target warehouse
+		# belongs to a DIFFERENT company this is always an external (inter-company)
+		# movement and must have a Gate Pass.
+		is_intercompany = False
+		for item in doc.items:
+			if item.t_warehouse:
+				wh_company = frappe.db.get_value("Warehouse", item.t_warehouse, "company")
+				if wh_company and wh_company != doc.company:
+					is_intercompany = True
+					break
+		if not is_intercompany:
+			return
 
 	frappe.enqueue(
 		utils.create_gate_pass_from_stock_entry,
