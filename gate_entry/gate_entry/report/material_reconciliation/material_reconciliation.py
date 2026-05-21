@@ -244,7 +244,17 @@ def normalise_document_type(value: str | None) -> str | None:
 
 
 def get_gate_pass_totals(filters: frappe._dict, document_reference_filter: str | None):
-	"""Aggregate Gate Pass quantities."""
+	"""Aggregate Gate Pass quantities.
+
+	For inter-company Stock Entry transfers the Gate Pass may be submitted
+	under the *receiving* company while the referenced Stock Entry belongs to
+	the *sending* company.  When the user filters by company we therefore:
+
+	  1. Include Gate Passes directly owned by the filtered company (standard).
+	  2. Include Gate Passes (Gate In, Stock Entry type) whose *referenced*
+	     Stock Entry belongs to the filtered company so that the sending
+	     company's reconciliation report shows 0 discrepancy as well.
+	"""
 
 	conditions = ["gp.docstatus = 1"]
 	values: dict[str, object] = {}
@@ -269,7 +279,19 @@ def get_gate_pass_totals(filters: frappe._dict, document_reference_filter: str |
 		values["supplier"] = filters.supplier
 
 	if filters.get("company"):
-		conditions.append("gp.company = %(company)s")
+		# Match gate passes directly under this company OR inter-company gate passes
+		# whose referenced Stock Entry belongs to this company.
+		conditions.append(
+			"(gp.company = %(company)s OR ("
+			"  gp.document_reference = 'Stock Entry'"
+			"  AND gp.entry_type = 'Gate In'"
+			"  AND EXISTS ("
+			"    SELECT 1 FROM `tabStock Entry` se"
+			"    WHERE se.name = gp.reference_number"
+			"    AND se.company = %(company)s"
+			"  )"
+			"))"
+		)
 		values["company"] = filters.company
 
 	# For Stock Entry, we might want to filter by reference number in main query if passed

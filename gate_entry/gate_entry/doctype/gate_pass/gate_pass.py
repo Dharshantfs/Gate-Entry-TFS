@@ -283,6 +283,7 @@ class GatePass(Document):
 			row = self.append("gate_pass_table", {})
 			row.item_code = item["item_code"]
 			row.item_name = item.get("item_name")
+			row.batch_no = item.get("batch_no")
 			row.description = item.get("description")
 			row.uom = item.get("uom")
 			row.stock_uom = item.get("stock_uom")
@@ -472,6 +473,7 @@ class GatePass(Document):
 				{
 					"item_code": row.item_code,
 					"item_name": row.item_name or "",
+					"batch_no": getattr(row, "batch_no", None),
 					"description": row.description or "",
 					"uom": row.uom or row.stock_uom,
 					"stock_uom": row.stock_uom,
@@ -747,7 +749,10 @@ class GatePass(Document):
 
 	def ensure_company_matches_reference(self, reference_doc):
 		"""
-		Ensure Gate Pass company aligns with reference document
+		Ensure Gate Pass company aligns with reference document.
+		For inter-company Gate In (Stock Entry), we allow the Gate Pass
+		company to differ from the reference so that JVE can receive
+		goods originally dispatched under JSB.
 		"""
 		if not reference_doc or not hasattr(reference_doc, "company"):
 			return
@@ -755,6 +760,12 @@ class GatePass(Document):
 		reference_company = reference_doc.company
 		if not reference_company:
 			return
+
+		# Allow inter-company Gate In on Stock Entry (cross-company transfer scenario)
+		if self.entry_type == "Gate In" and self.document_reference == "Stock Entry":
+			if not self.company:
+				self.company = reference_company
+			return  # Skip mismatch check – companies may intentionally differ
 
 		if not self.company:
 			self.company = reference_company
@@ -816,6 +827,181 @@ class GatePass(Document):
 
 		frappe.msgprint(_("Gate Pass submitted successfully"))
 		self.update_stock_entry_reference()
+
+		# Auto-create inter-company stock transfers when a Gate In for a Stock Entry
+		# is submitted under a different company (cross-company transfer scenario)
+		if (
+			self.entry_type == "Gate In"
+			and self.document_reference == "Stock Entry"
+			and self.reference_number
+		):
+			ref_company = frappe.db.get_value("Stock Entry", self.reference_number, "company")
+			if ref_company and ref_company != self.company:
+				self.create_intercompany_stock_transfers()
+
+	def create_intercompany_stock_transfers(self):
+		"""
+		When a Gate In Gate Pass under Company B (receiving company, e.g. JVE) is submitted,
+		and it references a Stock Entry originally created under Company A (e.g. JSB):
+
+		1. Create and submit a Material Issue in Company A to clear stock from
+		   the Goods in Transit warehouse.
+		2. Create and submit a Material Receipt in Company B to receive stock
+		   into the destination warehouse specified in the Gate Pass rows.
+
+		Both entries are created in Draft first so that validations can run,
+		then submitted.  Batch numbers are carried across; if the batch does not
+		yet exist in the destination company the system will create it.
+		"""
+		outbound_se = frappe.get_doc("Stock Entry", self.reference_number)
+		src_company = outbound_se.company       # e.g. Jayashree Spunbond (JSB)
+		dst_company = self.company              # e.g. J Vasanth Exports (JVE)
+
+		# ---- 1. Build item maps from the outbound Stock Entry ----
+		outbound_item_map = {row.name: row for row in outbound_se.items}
+
+		# ---- 2. Material Issue in source company (JSB) ----
+		# Issues items out of their transit warehouse (t_warehouse of original SE)
+		issue_se = frappe.new_doc("Stock Entry")
+		issue_se.stock_entry_type = "Material Issue"
+		issue_se.company = src_company
+		issue_se.posting_date = self.gate_pass_date or nowdate()
+		issue_se.posting_time = self.gate_pass_time or nowtime()
+		issue_se.set_posting_time = 1
+		issue_se.remarks = _("Auto-created by Gate Pass {0} – inter-company transfer out").format(self.name)
+
+		for gp_item in self.gate_pass_table:
+			received_qty = flt(gp_item.received_qty)
+			if received_qty <= 0:
+				continue
+
+			ob_row = outbound_item_map.get(gp_item.order_item_name)
+			if not ob_row:
+				continue
+
+			# Transit warehouse = where JSB's outbound SE put the goods
+			transit_wh = ob_row.t_warehouse
+			if not transit_wh:
+				frappe.throw(
+					_("Outbound Stock Entry {0} item {1} has no target warehouse set.").format(
+						self.reference_number, gp_item.item_code
+					)
+				)
+
+			issue_se.append(
+				"items",
+				{
+					"item_code": gp_item.item_code,
+					"item_name": gp_item.item_name,
+					"qty": received_qty,
+					"uom": gp_item.uom or ob_row.uom,
+					"stock_uom": gp_item.stock_uom or ob_row.stock_uom,
+					"conversion_factor": flt(gp_item.conversion_factor) or 1.0,
+					"s_warehouse": transit_wh,
+					"batch_no": gp_item.batch_no or ob_row.get("batch_no"),
+					"basic_rate": flt(gp_item.rate) or flt(ob_row.basic_rate),
+					"cost_center": ob_row.cost_center,
+					"project": ob_row.project,
+				},
+			)
+
+		if not issue_se.items:
+			frappe.throw(_("No items with received quantity found on Gate Pass {0}").format(self.name))
+
+		issue_se.insert(ignore_permissions=True)
+		issue_se.submit()
+
+		# ---- 3. Material Receipt in destination company (JVE) ----
+		receipt_se = frappe.new_doc("Stock Entry")
+		receipt_se.stock_entry_type = "Material Receipt"
+		receipt_se.company = dst_company
+		receipt_se.posting_date = self.gate_pass_date or nowdate()
+		receipt_se.posting_time = self.gate_pass_time or nowtime()
+		receipt_se.set_posting_time = 1
+		receipt_se.remarks = _("Auto-created by Gate Pass {0} – inter-company transfer in").format(self.name)
+
+		for gp_item in self.gate_pass_table:
+			received_qty = flt(gp_item.received_qty)
+			if received_qty <= 0:
+				continue
+
+			ob_row = outbound_item_map.get(gp_item.order_item_name)
+
+			# Target warehouse for JVE is taken from the Gate Pass row (editable by guard/user)
+			# Fall back to outbound SE t_warehouse if not set
+			dest_wh = gp_item.warehouse
+			if not dest_wh and ob_row:
+				dest_wh = ob_row.t_warehouse
+
+			if not dest_wh:
+				frappe.throw(
+					_("Please set a warehouse for item {0} in Gate Pass {1}").format(
+						gp_item.item_code, self.name
+					)
+				)
+
+			batch_no = gp_item.batch_no or (ob_row.get("batch_no") if ob_row else None)
+
+			# Auto-create batch in destination company if needed
+			if batch_no:
+				self.ensure_batch_exists(batch_no, gp_item.item_code)
+
+			receipt_se.append(
+				"items",
+				{
+					"item_code": gp_item.item_code,
+					"item_name": gp_item.item_name,
+					"qty": received_qty,
+					"uom": gp_item.uom or (ob_row.uom if ob_row else None),
+					"stock_uom": gp_item.stock_uom or (ob_row.stock_uom if ob_row else None),
+					"conversion_factor": flt(gp_item.conversion_factor) or 1.0,
+					"t_warehouse": dest_wh,
+					"batch_no": batch_no,
+					"basic_rate": flt(gp_item.rate) or (flt(ob_row.basic_rate) if ob_row else 0),
+					"cost_center": ob_row.cost_center if ob_row else None,
+					"project": ob_row.project if ob_row else None,
+				},
+			)
+
+		if not receipt_se.items:
+			frappe.throw(_("No items to receive for Gate Pass {0}").format(self.name))
+
+		receipt_se.insert(ignore_permissions=True)
+		receipt_se.submit()
+
+		# ---- 4. Store references on the Gate Pass ----
+		self.db_set("intercompany_issue_entry", issue_se.name, update_modified=False)
+		self.db_set("intercompany_receipt_entry", receipt_se.name, update_modified=False)
+
+		frappe.msgprint(
+			_(
+				"Inter-company stock entries created successfully:<br>"
+				"• Material Issue in {0}: <b>{1}</b><br>"
+				"• Material Receipt in {2}: <b>{3}</b>"
+			).format(src_company, issue_se.name, dst_company, receipt_se.name),
+			title=_("Inter-Company Transfer Complete"),
+			indicator="green",
+		)
+
+	def ensure_batch_exists(self, batch_no, item_code):
+		"""
+		Create a Batch record if it does not already exist.
+		This prevents the Material Receipt from failing when the batch
+		originated in a different company and has never been seen in
+		the destination company's ledger.
+		"""
+		if not batch_no or not item_code:
+			return
+		if frappe.db.exists("Batch", batch_no):
+			return
+		try:
+			batch = frappe.new_doc("Batch")
+			batch.batch_id = batch_no
+			batch.item = item_code
+			batch.insert(ignore_permissions=True)
+		except Exception:
+			# If creation fails (e.g. already created by a parallel process) ignore
+			pass
 
 	def before_cancel(self):
 		"""
@@ -1200,6 +1386,7 @@ def get_stock_entry_items_for_reference(stock_entry_name):
 		item = {
 			"item_code": row.item_code,
 			"item_name": row.item_name or "",
+			"batch_no": getattr(row, "batch_no", None),
 			"description": row.description or "",
 			"uom": row.uom or row.stock_uom,
 			"stock_uom": row.stock_uom,

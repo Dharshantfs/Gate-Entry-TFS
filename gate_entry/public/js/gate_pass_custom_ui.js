@@ -106,6 +106,7 @@ class GatePassCustomUI {
 						// Basic item details
 						item_code: row.item_code,
 						item_name: row.item_name || "",
+						batch_no: row.batch_no || "",
 						description: row.description || "",
 						uom: row.uom || "",
 						stock_uom: row.stock_uom || "",
@@ -177,6 +178,7 @@ class GatePassCustomUI {
 			// Basic item details
 			row.item_code = item.item_code;
 			row.item_name = item.item_name;
+			row.batch_no = item.batch_no || "";
 			row.description = item.description || "";
 			row.uom = item.uom || "";
 			row.stock_uom = item.stock_uom || "";
@@ -374,6 +376,10 @@ class GatePassCustomUI {
 		const inputDisabled = this.frm.doc.docstatus === 1;
 		const allowRemove = this.isGateIn();
 
+		const batch_badge = item.batch_no
+			? `<span class="badge badge-warning" style="font-size:9px;margin-left:4px;" title="Batch: ${frappe.utils.escape_html(item.batch_no)}">🏷 ${frappe.utils.escape_html(item.batch_no)}</span>`
+			: "";
+
 		return `
 			<div class="item-row ${status_class}" data-index="${index}">
 				<div class="item-col item-code-col">
@@ -383,6 +389,7 @@ class GatePassCustomUI {
 							? '<span class="badge badge-info" style="font-size: 9px; margin-left: 4px;">RC</span>'
 							: ""
 					}
+					${batch_badge}
 				</div>
 				<div class="item-col item-name-col">
 					<span class="item-name">${frappe.utils.escape_html(item.item_name)}</span>
@@ -592,6 +599,7 @@ class GatePassCustomUI {
 				// Basic item details
 				item_code: item.item_code,
 				item_name: item.item_name,
+				batch_no: item.batch_no || "",
 				description: item.description || "",
 				uom: item.uom || "",
 				stock_uom: item.stock_uom || "",
@@ -749,6 +757,13 @@ class GatePassCustomUI {
 				label: __("Item Name"),
 				read_only: 1,
 				default: item.item_name,
+			},
+			{
+				fieldtype: "Data",
+				fieldname: "batch_no",
+				label: __("Batch No"),
+				read_only: 1,
+				default: item.batch_no || "—",
 			},
 			{
 				fieldtype: "Small Text",
