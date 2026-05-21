@@ -886,6 +886,11 @@ class GatePass(Document):
 		issue_se.set_posting_time = 1
 		issue_se.remarks = _("Auto-created by Gate Pass {0} – inter-company transfer out").format(self.name)
 
+		# Tell ERPNext to accept batch_no directly on items instead of requiring
+		# Serial and Batch Bundle documents. This is the v15 way.
+		if frappe.get_meta("Stock Entry").has_field("use_serial_batch_fields"):
+			issue_se.use_serial_batch_fields = 1
+
 		for gp_item in self.gate_pass_table:
 			# Use received_qty (Gate In) OR dispatched_qty (Gate Out) OR ordered_qty.
 			# Handles auto-created Gate Out passes re-assigned to JVE company.
@@ -909,7 +914,6 @@ class GatePass(Document):
 			# Resolve batch from all possible sources
 			batch_no = self._resolve_batch_no(gp_item, ob_row)
 
-			# Build the item dict, handling both old-style batch_no and v14+ bundle
 			issue_item = {
 				"item_code": gp_item.item_code,
 				"item_name": gp_item.item_name,
@@ -918,11 +922,11 @@ class GatePass(Document):
 				"stock_uom": gp_item.stock_uom or ob_row.stock_uom,
 				"conversion_factor": flt(gp_item.conversion_factor) or 1.0,
 				"s_warehouse": transit_wh,
+				"batch_no": batch_no,
 				"basic_rate": flt(gp_item.rate) or flt(ob_row.basic_rate),
 				"cost_center": ob_row.cost_center,
 				"project": ob_row.project,
 			}
-			self._apply_batch_to_item(issue_item, gp_item.item_code, transit_wh, batch_no, received_qty, src_company, "Outward")
 			issue_se.append("items", issue_item)
 
 		if not issue_se.items:
@@ -939,6 +943,10 @@ class GatePass(Document):
 		receipt_se.posting_time = self.gate_pass_time or nowtime()
 		receipt_se.set_posting_time = 1
 		receipt_se.remarks = _("Auto-created by Gate Pass {0} – inter-company transfer in").format(self.name)
+
+		# Tell ERPNext to accept batch_no directly on items
+		if frappe.get_meta("Stock Entry").has_field("use_serial_batch_fields"):
+			receipt_se.use_serial_batch_fields = 1
 
 		for gp_item in self.gate_pass_table:
 			# Use received_qty (Gate In) OR dispatched_qty (Gate Out) OR ordered_qty.
@@ -992,7 +1000,7 @@ class GatePass(Document):
 			if batch_no:
 				self.ensure_batch_exists(batch_no, gp_item.item_code)
 
-			# Build receipt item, handling old-style batch_no and v14+ bundle
+			# Build receipt item with batch_no set directly
 			receipt_item = {
 				"item_code": gp_item.item_code,
 				"item_name": gp_item.item_name,
@@ -1001,11 +1009,11 @@ class GatePass(Document):
 				"stock_uom": gp_item.stock_uom or (ob_row.stock_uom if ob_row else None),
 				"conversion_factor": flt(gp_item.conversion_factor) or 1.0,
 				"t_warehouse": dest_wh,
+				"batch_no": batch_no,
 				"basic_rate": flt(gp_item.rate) or (flt(ob_row.basic_rate) if ob_row else 0),
 				"cost_center": ob_row.cost_center if ob_row else None,
 				"project": ob_row.project if ob_row else None,
 			}
-			self._apply_batch_to_item(receipt_item, gp_item.item_code, dest_wh, batch_no, received_qty, dst_company, "Inward")
 			receipt_se.append("items", receipt_item)
 
 		if not receipt_se.items:
