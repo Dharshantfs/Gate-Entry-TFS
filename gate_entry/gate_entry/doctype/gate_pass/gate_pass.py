@@ -841,13 +841,12 @@ class GatePass(Document):
 		frappe.msgprint(_("Gate Pass submitted successfully"))
 		self.update_stock_entry_reference()
 
-		# Auto-create inter-company stock transfers when a Gate In for a Stock Entry
-		# is submitted under a different company (cross-company transfer scenario)
-		if (
-			self.entry_type == "Gate In"
-			and self.document_reference == "Stock Entry"
-			and self.reference_number
-		):
+		# Auto-create inter-company stock transfers whenever a Gate Pass for a
+		# Stock Entry is submitted under a DIFFERENT company from the reference.
+		# Works regardless of entry_type (Gate In or Gate Out) so that even
+		# auto-created "Gate Out" passes that the user re-assigned to JVE still
+		# trigger the Material Issue + Material Receipt creation.
+		if self.document_reference == "Stock Entry" and self.reference_number:
 			ref_company = frappe.db.get_value("Stock Entry", self.reference_number, "company")
 			if ref_company and ref_company != self.company:
 				self.create_intercompany_stock_transfers()
@@ -884,7 +883,9 @@ class GatePass(Document):
 		issue_se.remarks = _("Auto-created by Gate Pass {0} – inter-company transfer out").format(self.name)
 
 		for gp_item in self.gate_pass_table:
-			received_qty = flt(gp_item.received_qty)
+			# Use received_qty (Gate In) OR dispatched_qty (Gate Out) OR ordered_qty.
+			# Handles auto-created Gate Out passes re-assigned to JVE company.
+			received_qty = flt(gp_item.received_qty) or flt(gp_item.dispatched_qty) or flt(gp_item.ordered_qty)
 			if received_qty <= 0:
 				continue
 
@@ -934,7 +935,9 @@ class GatePass(Document):
 		receipt_se.remarks = _("Auto-created by Gate Pass {0} – inter-company transfer in").format(self.name)
 
 		for gp_item in self.gate_pass_table:
-			received_qty = flt(gp_item.received_qty)
+			# Use received_qty (Gate In) OR dispatched_qty (Gate Out) OR ordered_qty.
+			# Handles auto-created Gate Out passes re-assigned to JVE company.
+			received_qty = flt(gp_item.received_qty) or flt(gp_item.dispatched_qty) or flt(gp_item.ordered_qty)
 			if received_qty <= 0:
 				continue
 
