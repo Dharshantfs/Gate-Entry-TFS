@@ -187,6 +187,7 @@ def create_gate_pass_from_stock_entry(stock_entry_name: str, enqueued_by: str | 
 			gate_pass.entry_type = "Gate Out"
 
 		gate_pass.populate_gate_pass_items(gate_pass.get_stock_entry_items(stock_entry))
+		gate_pass.flags.ignore_mandatory = True
 		gate_pass.insert(ignore_permissions=True)
 		frappe.db.commit()  # nosemgrep
 
@@ -216,6 +217,7 @@ def create_gate_pass_from_stock_entry(stock_entry_name: str, enqueued_by: str | 
 			jve_gp.entry_type = "Gate In"
 
 			jve_gp.populate_gate_pass_items(jve_gp.get_stock_entry_items(stock_entry))
+			jve_gp.flags.ignore_mandatory = True
 			jve_gp.insert(ignore_permissions=True)
 			frappe.db.commit()  # nosemgrep
 
