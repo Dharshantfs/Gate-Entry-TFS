@@ -1011,8 +1011,6 @@ class GatePass(Document):
 				"t_warehouse": dest_wh,
 				"batch_no": batch_no,
 				"basic_rate": flt(gp_item.rate) or (flt(ob_row.basic_rate) if ob_row else 0),
-				"cost_center": ob_row.cost_center if ob_row else None,
-				"project": ob_row.project if ob_row else None,
 			}
 			receipt_se.append("items", receipt_item)
 
