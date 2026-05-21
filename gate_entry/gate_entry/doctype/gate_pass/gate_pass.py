@@ -965,9 +965,20 @@ class GatePass(Document):
 				if wh_company != dst_company:
 					dest_wh = None
 
-			# Fall back to the mapped destination warehouse for the receiving company
+			# Fall back to dynamically finding the Finished Goods warehouse for the receiving company
 			if not dest_wh:
-				dest_wh = INTERCOMPANY_DEST_WAREHOUSE_MAP.get(dst_company)
+				# Look for any warehouse containing 'Finished Goods' for the destination company
+				found_wh = frappe.get_all(
+					"Warehouse",
+					filters={"company": dst_company, "is_group": 0, "name": ["like", "%Finished Goods%"]},
+					pluck="name",
+					limit=1
+				)
+				if found_wh:
+					dest_wh = found_wh[0]
+				else:
+					# Fallback to map if 'Finished Goods' is not found
+					dest_wh = INTERCOMPANY_DEST_WAREHOUSE_MAP.get(dst_company)
 
 			if not dest_wh:
 				frappe.throw(
@@ -980,12 +991,12 @@ class GatePass(Document):
 
 			# Validate the warehouse actually exists in the system
 			if not frappe.db.exists("Warehouse", dest_wh):
-				# Try fetching warehouses for dst_company to give a helpful hint
+				# Fetch up to 20 warehouses so the hint is actually useful
 				available = frappe.get_all(
 					"Warehouse",
 					filters={"company": dst_company, "is_group": 0},
 					pluck="name",
-					limit=5,
+					limit=20,
 				)
 				hint = (_(", ").join(available)) if available else _("(none found)")
 				frappe.throw(
