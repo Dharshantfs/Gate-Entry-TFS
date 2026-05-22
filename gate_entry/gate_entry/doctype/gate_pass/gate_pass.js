@@ -99,6 +99,39 @@ frappe.ui.form.on("Gate Pass", {
 			};
 		});
 
+		if (frm.is_new()) {
+			frm.add_custom_button(__("Scan QR"), function() {
+				if (frappe.ui.Scanner) {
+					new frappe.ui.Scanner({
+						dialog: true,
+						multiple: false,
+						on_scan(data) {
+							if (data && data.decodedText) {
+								process_qr_scan(frm, data.decodedText);
+							} else if (typeof data === "string") {
+								process_qr_scan(frm, data);
+							}
+						}
+					});
+				} else {
+					let d = new frappe.ui.Dialog({
+						title: 'Scan QR Code',
+						fields: [{
+							label: 'Scan Here',
+							fieldname: 'qr_data',
+							fieldtype: 'Small Text'
+						}],
+						primary_action_label: 'Apply',
+						primary_action(values) {
+							process_qr_scan(frm, values.qr_data);
+							d.hide();
+						}
+					});
+					d.show();
+				}
+			}, __("Actions"));
+		}
+
 		refresh_compliance_status(frm);
 	},
 	onload(frm) {
@@ -748,4 +781,43 @@ function show_stock_entry_guidance(frm) {
 			"orange"
 		);
 	}
+}
+
+function process_qr_scan(frm, qr_text) {
+	if (!qr_text) return;
+	
+	let data = {};
+	qr_text.split('\n').forEach(line => {
+		if (line.includes(':')) {
+			let parts = line.split(':');
+			let key = parts[0].trim().toLowerCase();
+			let val = parts.slice(1).join(':').trim();
+			data[key] = val;
+		}
+	});
+
+	// Keys expected based on user format:
+	// Company: Jayashree Spun Bond - 1ZT (origin, we ignore)
+	// Challan No: MAT-STE-01546
+	// DocType: Stock Entry
+	// Date: 2026-05-21
+	// Party: J Vasanth Exports
+	
+	let doctype = data["doctype"];
+	if (!doctype) return frappe.msgprint(__("Invalid QR: DocType not found."));
+
+	// Set document_reference first so the trigger runs, then set reference_number
+	frm.set_value("document_reference", doctype).then(() => {
+		if (data["party"]) {
+			frm.set_value("company", data["party"]);
+		}
+		
+		frm.set_value("entry_type", "Gate In");
+		
+		if (data["challan no"]) {
+			frm.set_value("reference_number", data["challan no"]);
+		}
+		
+		frappe.show_alert({message: __('QR Code applied successfully'), indicator: 'green'});
+	});
 }
