@@ -188,7 +188,7 @@ def create_gate_pass_from_stock_entry(stock_entry_name: str, enqueued_by: str | 
 
 		gate_pass.populate_gate_pass_items(gate_pass.get_stock_entry_items(stock_entry))
 		gate_pass.flags.ignore_mandatory = True
-		gate_pass.insert(ignore_permissions=True)
+		gate_pass.insert(ignore_permissions=True, ignore_mandatory=True)
 		frappe.db.commit()  # nosemgrep
 
 	# --- Detect inter-company transfer and auto-create Gate In for receiving company ---
@@ -218,7 +218,7 @@ def create_gate_pass_from_stock_entry(stock_entry_name: str, enqueued_by: str | 
 
 			jve_gp.populate_gate_pass_items(jve_gp.get_stock_entry_items(stock_entry))
 			jve_gp.flags.ignore_mandatory = True
-			jve_gp.insert(ignore_permissions=True)
+			jve_gp.insert(ignore_permissions=True, ignore_mandatory=True)
 			frappe.db.commit()  # nosemgrep
 
 

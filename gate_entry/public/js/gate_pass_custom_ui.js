@@ -642,10 +642,18 @@ class GatePassCustomUI {
 			return;
 		}
 
-		const item = this.items[index];
+		let ui_items = this.get_ui_items();
+		if (index < 0 || index >= ui_items.length) {
+			return;
+		}
+		
+		const item = ui_items[index];
 
 		frappe.confirm(__("Are you sure you want to remove {0}?", [item.item_code]), () => {
-			this.items.splice(index, 1);
+			// Remove from backend array in reverse order to preserve indices
+			item.backend_indices.sort((a, b) => b - a).forEach(idx => {
+				this.items.splice(idx, 1);
+			});
 			this.sync_to_child_table();
 			this.render();
 			frappe.show_alert({
@@ -740,9 +748,41 @@ class GatePassCustomUI {
 	 * Show item details in a dialog
 	 */
 	show_item_details(index) {
-		const item = this.items[index];
+		let ui_items = this.get_ui_items();
+		if (index < 0 || index >= ui_items.length) {
+			return;
+		}
+		
+		const item = ui_items[index];
 		const is_rate_contract = item.is_rate_contract || 0;
 		const is_outbound = this.isOutbound();
+		
+		let batches_html = "";
+		if (item.backend_indices && item.backend_indices.length > 1) {
+			batches_html = `<div style="margin-top: 15px;">
+				<h6><i class="fa fa-cubes text-muted"></i> Roll / Batch Details</h6>
+				<table class="table table-bordered table-condensed" style="font-size: 11px;">
+					<thead>
+						<tr>
+							<th>Batch No</th>
+							<th class="text-right">Ordered Qty</th>
+							<th class="text-right">${this.getQuantityLabel()}</th>
+						</tr>
+					</thead>
+					<tbody>
+						${item.backend_indices.map(idx => {
+							let b_item = this.items[idx];
+							return \`<tr>
+								<td>\${b_item.batch_no || '-'}</td>
+								<td class="text-right">\${parseFloat(b_item.ordered_qty || 0).toFixed(2)}</td>
+								<td class="text-right">\${parseFloat(b_item[this.getQuantityField()] || 0).toFixed(2)}</td>
+							</tr>\`;
+						}).join('')}
+					</tbody>
+				</table>
+			</div>`;
+		}
+
 		let fields = [
 			{
 				fieldtype: "Data",
@@ -763,7 +803,8 @@ class GatePassCustomUI {
 				fieldname: "batch_no",
 				label: __("Batch No"),
 				read_only: 1,
-				default: item.batch_no || "—",
+				default: item.batch_no || "N/A",
+				hidden: item.backend_indices && item.backend_indices.length > 1 ? 1 : 0
 			},
 			{
 				fieldtype: "Small Text",
@@ -773,61 +814,33 @@ class GatePassCustomUI {
 				default: item.description || "N/A",
 			},
 			{
-				fieldtype: "Column Break",
-			},
-			{
 				fieldtype: "Data",
 				fieldname: "uom",
 				label: __("UOM"),
 				read_only: 1,
 				default: item.uom || "N/A",
 			},
-		];
-
-		// Add order type information
-		if (is_outbound) {
-			fields.push({
+			{
 				fieldtype: "Float",
-				fieldname: "dispatched_qty",
-				label: __("Dispatched Qty"),
+				fieldname: "ordered_qty",
+				label: __("Ordered Qty"),
 				read_only: 1,
-				default: item.dispatched_qty || 0,
-			});
-		} else {
-			if (is_rate_contract) {
-				fields.push({
-					fieldtype: "Data",
-					fieldname: "order_type",
-					label: __("Order Type"),
-					read_only: 1,
-					default: "Rate Contract",
-				});
-			} else {
-				fields.push({
-					fieldtype: "Float",
-					fieldname: "ordered_qty",
-					label: __("Ordered Qty"),
-					read_only: 1,
-					default: item.ordered_qty || 0,
-				});
-				fields.push({
-					fieldtype: "Float",
-					fieldname: "pending_qty",
-					label: __("Pending Qty"),
-					read_only: 1,
-					default: item.pending_qty || 0,
-				});
+				default: item.ordered_qty || 0,
+			},
+			{
+				fieldtype: "Float",
+				fieldname: "quantity",
+				label: is_outbound ? __("Dispatched Qty") : __("Received Qty"),
+				read_only: 1,
+				default: this.getQuantityValue(item),
+			},
+			{
+				fieldtype: "HTML",
+				fieldname: "batches_html",
+				options: batches_html
 			}
-
-			fields.push({
-				fieldtype: "Float",
-				fieldname: "received_qty",
-				label: __("Received Qty"),
-				read_only: 1,
-				default: item.received_qty || 0,
-			});
-		}
-
+		];
+		
 		const dialog = new frappe.ui.Dialog({
 			title: __("Item Details"),
 			fields: fields,
