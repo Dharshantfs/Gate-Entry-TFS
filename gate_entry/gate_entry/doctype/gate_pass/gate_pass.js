@@ -132,6 +132,12 @@ frappe.ui.form.on("Gate Pass", {
 			}, __("Actions"));
 		}
 
+		if (!frm.doc.driver_photo && frm.doc.docstatus === 0) {
+			frm.add_custom_button(__("Capture Driver Photo"), function() {
+				capture_driver_photo(frm);
+			}, __("Actions"));
+		}
+
 		refresh_compliance_status(frm);
 	},
 	onload(frm) {
@@ -142,6 +148,31 @@ frappe.ui.form.on("Gate Pass", {
 				},
 			};
 		});
+	},
+
+	before_submit(frm) {
+		if (!frm.doc.driver_photo) {
+			frappe.msgprint(__("Driver Photo is mandatory before submitting."));
+			frappe.validated = false;
+		}
+	},
+
+	before_save(frm) {
+		let vehicle_changed = frm.doc.fetched_vehicle_number && frm.doc.vehicle_number !== frm.doc.fetched_vehicle_number;
+		let driver_changed = frm.doc.fetched_driver_name && frm.doc.driver_name !== frm.doc.fetched_driver_name;
+		
+		if ((vehicle_changed || driver_changed) && !frm.doc.driver_change_remarks) {
+			frappe.validated = false;
+			frappe.prompt({
+				label: __('Reason for changing Driver/Vehicle'),
+				fieldname: 'remarks',
+				fieldtype: 'Small Text',
+				reqd: 1
+			}, (values) => {
+				frm.set_value('driver_change_remarks', values.remarks);
+				frm.save();
+			}, __('Remarks Required'), __('Save'));
+		}
 	},
 
 	after_save(frm) {
@@ -265,6 +296,80 @@ frappe.ui.form.on("Gate Pass", {
 		auto_set_intercompany_warehouses(frm);
 	},
 });
+
+function capture_driver_photo(frm) {
+	let d = new frappe.ui.Dialog({
+		title: __("Capture Driver Photo"),
+		fields: [
+			{
+				fieldtype: "HTML",
+				fieldname: "video_container",
+				options: `
+					<div style="text-align:center;">
+						<video id="driver_video" width="100%" height="auto" autoplay playsinline></video>
+						<canvas id="driver_canvas" style="display:none;"></canvas>
+					</div>
+				`
+			}
+		],
+		primary_action_label: __("Capture & Attach"),
+		primary_action: function() {
+			let video = document.getElementById("driver_video");
+			let canvas = document.getElementById("driver_canvas");
+			if (!video || !canvas) return;
+			
+			canvas.width = video.videoWidth;
+			canvas.height = video.videoHeight;
+			canvas.getContext("2d").drawImage(video, 0, 0);
+			
+			let data_url = canvas.toDataURL("image/jpeg");
+			let filename = "Driver_Photo_" + frappe.datetime.now_datetime().replace(/[-:\s]/g, "") + ".jpg";
+			
+			fetch(data_url)
+				.then(res => res.blob())
+				.then(blob => {
+					let file = new File([blob], filename, { type: "image/jpeg" });
+					
+					// Upload using frappe upload API
+					new frappe.ui.FileUploader({
+						files: [file],
+						doctype: frm.doc.doctype,
+						docname: frm.doc.name,
+						fieldname: "driver_photo",
+						is_private: 0,
+						on_success: (file_doc) => {
+							frm.set_value("driver_photo", file_doc.file_url);
+							d.hide();
+						}
+					});
+				});
+		}
+	});
+
+	d.on_page_show = () => {
+		let video = document.getElementById("driver_video");
+		if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+			navigator.mediaDevices.getUserMedia({ video: true })
+				.then(stream => {
+					video.srcObject = stream;
+					d.stream = stream;
+				})
+				.catch(err => {
+					frappe.msgprint(__("Camera access denied or not available."));
+				});
+		} else {
+			frappe.msgprint(__("Camera API not supported in this browser."));
+		}
+	};
+
+	d.onhide = () => {
+		if (d.stream) {
+			d.stream.getTracks().forEach(track => track.stop());
+		}
+	};
+
+	d.show();
+}
 
 /**
  * Auto-fill item warehouses when the Gate Pass company is changed
@@ -531,6 +636,39 @@ function load_reference_details(frm) {
 			console.log("Updates: ", updates);
 			frm.set_value(updates).then(() => {
 				frm.refresh();
+				if (frm.doc.document_reference === "Stock Entry" && frm.doc.entry_type === "Gate In") {
+					frappe.call({
+						method: "gate_entry.gate_entry.doctype.gate_pass.gate_pass.get_origin_vehicle_details",
+						args: { reference_number: frm.doc.reference_number },
+						callback(r) {
+							if (r.message && Object.keys(r.message).length > 0) {
+								let origin_updates = {};
+								if (!frm.doc.vehicle_number && r.message.vehicle_number) {
+									origin_updates.vehicle_number = r.message.vehicle_number;
+								}
+								if (!frm.doc.driver_name && r.message.driver_name) {
+									origin_updates.driver_name = r.message.driver_name;
+								}
+								if (!frm.doc.driver_contact && r.message.driver_contact) {
+									origin_updates.driver_contact = r.message.driver_contact;
+								}
+								
+								if (Object.keys(origin_updates).length > 0) {
+									frm.set_value(origin_updates).then(() => {
+										frm.set_value("fetched_vehicle_number", frm.doc.vehicle_number);
+										frm.set_value("fetched_driver_name", frm.doc.driver_name);
+									});
+								} else {
+									frm.set_value("fetched_vehicle_number", frm.doc.vehicle_number);
+									frm.set_value("fetched_driver_name", frm.doc.driver_name);
+								}
+							}
+						}
+					});
+				} else {
+					frm.set_value("fetched_vehicle_number", frm.doc.vehicle_number);
+					frm.set_value("fetched_driver_name", frm.doc.driver_name);
+				}
 			});
 		},
 	});

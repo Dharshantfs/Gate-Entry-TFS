@@ -1687,6 +1687,35 @@ def extract_transport_details(doc):
 		or doc.get("contact_phone"),
 	}
 
+@frappe.whitelist()
+def get_origin_vehicle_details(reference_number):
+	"""
+	For an inter-company Gate In against a Stock Entry,
+	find the original Gate Out and return its vehicle and driver details.
+	"""
+	gate_pass = frappe.db.get_value(
+		"Gate Pass", 
+		{
+			"reference_number": reference_number,
+			"entry_type": "Gate Out"
+		}, 
+		["vehicle_number", "driver_name", "driver_contact"], 
+		as_dict=True
+	)
+	
+	if not gate_pass:
+		gate_pass = frappe.db.get_value(
+			"Gate Pass", 
+			{
+				"outbound_material_transfer": reference_number,
+				"entry_type": "Gate Out"
+			}, 
+			["vehicle_number", "driver_name", "driver_contact"], 
+			as_dict=True
+		)
+
+	return gate_pass or {}
+
 
 def extract_compliance_details(doc, document_reference):
 	"""

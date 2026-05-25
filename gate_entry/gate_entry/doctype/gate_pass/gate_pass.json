@@ -26,6 +26,10 @@
   "vehicle_number",
   "driver_name",
   "driver_contact",
+  "driver_photo",
+  "driver_change_remarks",
+  "fetched_vehicle_number",
+  "fetched_driver_name",
   "security_guard_name",
   "gate_entry_date",
   "gate_entry_time",
@@ -197,6 +201,29 @@
    "fieldname": "driver_contact",
    "fieldtype": "Phone",
    "label": "Driver Contact Number"
+  },
+  {
+   "fieldname": "driver_photo",
+   "fieldtype": "Attach Image",
+   "label": "Driver Photo"
+  },
+  {
+   "fieldname": "driver_change_remarks",
+   "fieldtype": "Small Text",
+   "label": "Driver Change Remarks",
+   "depends_on": "eval:doc.fetched_vehicle_number || doc.fetched_driver_name"
+  },
+  {
+   "fieldname": "fetched_vehicle_number",
+   "fieldtype": "Data",
+   "label": "Fetched Vehicle Number",
+   "hidden": 1
+  },
+  {
+   "fieldname": "fetched_driver_name",
+   "fieldtype": "Data",
+   "label": "Fetched Driver Name",
+   "hidden": 1
   },
   {
    "fieldname": "security_guard_name",
