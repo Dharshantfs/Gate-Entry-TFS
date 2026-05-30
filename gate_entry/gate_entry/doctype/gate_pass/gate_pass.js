@@ -12,7 +12,7 @@ const DOCUMENT_REFERENCES = [
 // auto-fill all item warehouses with the mapped destination warehouse.
 const INTERCOMPANY_WAREHOUSE_MAP = {
 	"J Vasanth Exports": "Finished Goods Warehouse - JVE",
-	"Thusma SMS Nonwovens Private Limited - 170": "Finished Goods Warehouse - TSNPL",
+	"Thusma SMS Nonwovens Private Limited - 1Z0": "Finished Goods Warehouse - TSNPL",
 };
 
 // The transit warehouse used by JSB for inter-company transfers
