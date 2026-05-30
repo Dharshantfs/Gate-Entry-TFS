@@ -206,12 +206,17 @@ def create_gate_pass_from_stock_entry(stock_entry_name: str, enqueued_by: str | 
 	if is_material_transfer(stock_entry) and not is_return:
 		# Find the receiving company from the target warehouse
 		receiving_company = None
-		for item in stock_entry.items:
-			if item.t_warehouse:
-				wh_company = frappe.db.get_value("Warehouse", item.t_warehouse, "company")
-				if wh_company and wh_company != stock_entry.company:
-					receiving_company = wh_company
-					break
+		# First check if there's an explicit custom field for Transfer To Company
+		receiving_company = getattr(stock_entry, "transfer_to_company", None)
+		
+		# If not, fallback to checking the target warehouse's company
+		if not receiving_company:
+			for item in stock_entry.items:
+				if item.t_warehouse:
+					wh_company = frappe.db.get_value("Warehouse", item.t_warehouse, "company")
+					if wh_company and wh_company != stock_entry.company:
+						receiving_company = wh_company
+						break
 
 		if receiving_company and not has_existing_gate_pass(receiving_company):
 			jve_gp = frappe.new_doc("Gate Pass")

@@ -2722,12 +2722,15 @@ def on_stock_entry_submit(doc, method):
 		# belongs to a DIFFERENT company this is always an external (inter-company)
 		# movement and must have a Gate Pass.
 		is_intercompany = False
-		for item in doc.items:
-			if item.t_warehouse:
-				wh_company = frappe.db.get_value("Warehouse", item.t_warehouse, "company")
-				if wh_company and wh_company != doc.company:
-					is_intercompany = True
-					break
+		if getattr(doc, "transfer_to_company", None):
+			is_intercompany = True
+		else:
+			for item in doc.items:
+				if item.t_warehouse:
+					wh_company = frappe.db.get_value("Warehouse", item.t_warehouse, "company")
+					if wh_company and wh_company != doc.company:
+						is_intercompany = True
+						break
 		if not is_intercompany:
 			return
 
