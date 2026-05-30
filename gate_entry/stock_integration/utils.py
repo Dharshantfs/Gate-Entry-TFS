@@ -120,7 +120,15 @@ def create_gate_pass_from_stock_entry(stock_entry_name: str, enqueued_by: str | 
 		return
 
 	if is_material_transfer(stock_entry) and not is_external_transfer(stock_entry):
-		return
+		is_intercompany = False
+		for item in stock_entry.items:
+			if item.t_warehouse:
+				wh_company = frappe.db.get_value("Warehouse", item.t_warehouse, "company")
+				if wh_company and wh_company != stock_entry.company:
+					is_intercompany = True
+					break
+		if not is_intercompany:
+			return
 
 	is_return = is_return_entry(stock_entry)
 
