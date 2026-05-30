@@ -181,7 +181,7 @@ def create_gate_pass_from_stock_entry(stock_entry_name: str, enqueued_by: str | 
 		gate_pass.document_reference = "Stock Entry"
 		gate_pass.reference_number = stock_entry.name
 		gate_pass.company = stock_entry.company
-		gate_pass.vehicle_number = stock_entry.vehicle_no or ""
+		gate_pass.vehicle_number = getattr(stock_entry, "vehicle_no", "")
 		gate_pass.driver_name = ""
 		gate_pass.driver_contact = ""
 		gate_pass.stock_entry = stock_entry.name
@@ -218,7 +218,7 @@ def create_gate_pass_from_stock_entry(stock_entry_name: str, enqueued_by: str | 
 			jve_gp.document_reference = "Stock Entry"
 			jve_gp.reference_number = stock_entry.name
 			jve_gp.company = receiving_company
-			jve_gp.vehicle_number = stock_entry.vehicle_no or ""
+			jve_gp.vehicle_number = getattr(stock_entry, "vehicle_no", "")
 			jve_gp.driver_name = ""
 			jve_gp.driver_contact = ""
 			jve_gp.stock_entry = stock_entry.name
