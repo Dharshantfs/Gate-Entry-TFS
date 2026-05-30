@@ -2722,7 +2722,12 @@ def on_stock_entry_submit(doc, method):
 		# belongs to a DIFFERENT company this is always an external (inter-company)
 		# movement and must have a Gate Pass.
 		is_intercompany = False
-		if getattr(doc, "transfer_to_company", None):
+		transfer_to_company = getattr(doc, "transfer_to_company", None)
+		party = getattr(doc, "party", None)
+		
+		if transfer_to_company and transfer_to_company != doc.company:
+			is_intercompany = True
+		elif party and party != doc.company:
 			is_intercompany = True
 		else:
 			for item in doc.items:
