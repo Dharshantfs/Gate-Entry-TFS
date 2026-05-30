@@ -199,41 +199,6 @@ def create_gate_pass_from_stock_entry(stock_entry_name: str, enqueued_by: str | 
 		gate_pass.insert(ignore_permissions=True, ignore_mandatory=True)
 		frappe.db.commit()  # nosemgrep
 
-	# --- Detect inter-company transfer and auto-create Gate In for receiving company ---
-	# When JSB does a Material Transfer targeting a warehouse in another company (JVE),
-	# auto-create a draft Gate In for JVE so the receiving user doesn't have to
-	# manually create it or change the company on the JSB Gate Out pass.
-	if is_material_transfer(stock_entry) and not is_return:
-		# Find the receiving company from the target warehouse
-		receiving_company = None
-		# First check if there's an explicit custom field for Transfer To Company
-		receiving_company = getattr(stock_entry, "transfer_to_company", None)
-		
-		# If not, fallback to checking the target warehouse's company
-		if not receiving_company:
-			for item in stock_entry.items:
-				if item.t_warehouse:
-					wh_company = frappe.db.get_value("Warehouse", item.t_warehouse, "company")
-					if wh_company and wh_company != stock_entry.company:
-						receiving_company = wh_company
-						break
-
-		if receiving_company and not has_existing_gate_pass(receiving_company):
-			jve_gp = frappe.new_doc("Gate Pass")
-			jve_gp.document_reference = "Stock Entry"
-			jve_gp.reference_number = stock_entry.name
-			jve_gp.company = receiving_company
-			jve_gp.vehicle_number = getattr(stock_entry, "vehicle_no", "")
-			jve_gp.driver_name = ""
-			jve_gp.driver_contact = ""
-			jve_gp.stock_entry = stock_entry.name
-			jve_gp.entry_type = "Gate In"
-
-			jve_gp.populate_gate_pass_items(jve_gp.get_stock_entry_items(stock_entry))
-			jve_gp.flags.ignore_mandatory = True
-			jve_gp.insert(ignore_permissions=True, ignore_mandatory=True)
-			frappe.db.commit()  # nosemgrep
-
 
 def cancel_gate_passes_for_stock_entry(stock_entry):
 	gate_passes = frappe.get_all(
