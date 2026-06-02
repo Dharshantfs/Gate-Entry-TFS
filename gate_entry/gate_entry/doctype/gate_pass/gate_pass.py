@@ -23,6 +23,7 @@ logger = frappe.logger("Gate Pass")
 INTERCOMPANY_DEST_WAREHOUSE_MAP = {
 	"J Vasanth Exports": "Finished Goods Warehouse - JVE",
 	"Thusma SMS Nonwovens Private Limited - 1Z0": "Finished Goods Warehouse - TSNPL",
+	"Varshine Tex (Puducherry)": "Raw Materials Warehouse  - VTP",
 }
 
 # Transit warehouse on the sending company side (JSB).

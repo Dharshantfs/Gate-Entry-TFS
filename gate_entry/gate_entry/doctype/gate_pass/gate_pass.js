@@ -13,6 +13,7 @@ const DOCUMENT_REFERENCES = [
 const INTERCOMPANY_WAREHOUSE_MAP = {
 	"J Vasanth Exports": "Finished Goods Warehouse - JVE",
 	"Thusma SMS Nonwovens Private Limited - 1Z0": "Finished Goods Warehouse - TSNPL",
+	"Varshine Tex (Puducherry)": "Raw Materials Warehouse  - VTP",
 };
 
 // The transit warehouse used by JSB for inter-company transfers
