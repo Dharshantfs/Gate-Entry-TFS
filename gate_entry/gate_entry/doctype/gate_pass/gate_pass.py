@@ -17,6 +17,18 @@ from gate_entry.stock_integration import utils as stock_utils
 
 logger = frappe.logger("Gate Pass")
 
+# Inter-company destination warehouse mapping.
+# When a Gate In is submitted under a receiving company, items with no
+# warehouse set on the Gate Pass row will fall back to this warehouse.
+INTERCOMPANY_DEST_WAREHOUSE_MAP = {
+	"J Vasanth Exports": "Finished Goods Warehouse - JVE",
+	"Thusma SMS Nonwovens Private Limited - 1Z0": "Finished Goods Warehouse - TSNPL",
+	"Varshine Tex (Puducherry)": "Raw Materials Warehouse  - VTP",
+}
+
+# Transit warehouse on the sending company side (JSB).
+JSB_TRANSIT_WAREHOUSE = "Goods In Transit - JSB-1ZT"
+
 
 class GatePass(Document):
 	def is_outbound_reference(self):
@@ -139,6 +151,10 @@ class GatePass(Document):
 
 		if stock_utils.is_material_transfer(stock_entry):
 			if stock_utils.is_return_entry(stock_entry):
+				return "Gate In"
+			# Inter-company transfer: if this Gate Pass belongs to the RECEIVING company
+			# (different from the stock entry's company), it must be a Gate In.
+			if self.company and stock_entry.company and self.company != stock_entry.company:
 				return "Gate In"
 			return "Gate Out"
 
@@ -283,6 +299,7 @@ class GatePass(Document):
 			row = self.append("gate_pass_table", {})
 			row.item_code = item["item_code"]
 			row.item_name = item.get("item_name")
+			row.batch_no = item.get("batch_no")
 			row.description = item.get("description")
 			row.uom = item.get("uom")
 			row.stock_uom = item.get("stock_uom")
@@ -472,6 +489,7 @@ class GatePass(Document):
 				{
 					"item_code": row.item_code,
 					"item_name": row.item_name or "",
+					"batch_no": getattr(row, "batch_no", None),
 					"description": row.description or "",
 					"uom": row.uom or row.stock_uom,
 					"stock_uom": row.stock_uom,
@@ -747,7 +765,12 @@ class GatePass(Document):
 
 	def ensure_company_matches_reference(self, reference_doc):
 		"""
-		Ensure Gate Pass company aligns with reference document
+		Ensure Gate Pass company aligns with reference document.
+		For Stock Entry references we always skip the company-match check
+		because both same-company and inter-company transfers are valid:
+		  - Same company (JSB Gate Out): company will match naturally.
+		  - Inter-company (JVE Gate In receives JSB goods): company differs
+		    intentionally – enforcing a match would break the cross-company flow.
 		"""
 		if not reference_doc or not hasattr(reference_doc, "company"):
 			return
@@ -755,6 +778,13 @@ class GatePass(Document):
 		reference_company = reference_doc.company
 		if not reference_company:
 			return
+
+		# For Stock Entry references, skip company validation entirely.
+		# Inter-company transfers intentionally cross company boundaries.
+		if self.document_reference == "Stock Entry":
+			if not self.company:
+				self.company = reference_company
+			return  # ← do NOT throw for Stock Entry regardless of entry_type
 
 		if not self.company:
 			self.company = reference_company
@@ -816,6 +846,370 @@ class GatePass(Document):
 
 		frappe.msgprint(_("Gate Pass submitted successfully"))
 		self.update_stock_entry_reference()
+
+		# Auto-create inter-company stock transfers whenever a Gate Pass for a
+		# Stock Entry is submitted under a DIFFERENT company from the reference.
+		# Works regardless of entry_type (Gate In or Gate Out) so that even
+		# auto-created "Gate Out" passes that the user re-assigned to JVE still
+		# trigger the Material Issue + Material Receipt creation.
+		if self.document_reference == "Stock Entry" and self.reference_number:
+			ref_company = frappe.db.get_value("Stock Entry", self.reference_number, "company")
+			if ref_company and ref_company != self.company:
+				self.create_intercompany_stock_transfers()
+
+	def create_intercompany_stock_transfers(self):
+		"""
+		When a Gate In Gate Pass under Company B (receiving company, e.g. JVE) is submitted,
+		and it references a Stock Entry originally created under Company A (e.g. JSB):
+
+		1. Create and submit a Material Issue in Company A to clear stock from
+		   the Goods in Transit warehouse.
+		2. Create and submit a Material Receipt in Company B to receive stock
+		   into the destination warehouse specified in the Gate Pass rows.
+
+		Both entries are created in Draft first so that validations can run,
+		then submitted.  Batch numbers are carried across; if the batch does not
+		yet exist in the destination company the system will create it.
+		"""
+		outbound_se = frappe.get_doc("Stock Entry", self.reference_number)
+		src_company = outbound_se.company       # e.g. Jayashree Spunbond (JSB)
+		dst_company = self.company              # e.g. J Vasanth Exports (JVE)
+
+		# ---- 1. Build item maps from the outbound Stock Entry ----
+		outbound_item_map = {row.name: row for row in outbound_se.items}
+
+		# ---- 2. Material Issue in source company (JSB) ----
+		# Issues items out of their transit warehouse (t_warehouse of original SE)
+		issue_se = frappe.new_doc("Stock Entry")
+		issue_se.stock_entry_type = "Material Issue"
+		issue_se.company = src_company
+		issue_se.posting_date = self.gate_pass_date or nowdate()
+		issue_se.posting_time = self.gate_pass_time or nowtime()
+		issue_se.set_posting_time = 1
+		issue_se.remarks = _("Auto-created by Gate Pass {0} – inter-company transfer out").format(self.name)
+
+		# Tell ERPNext to accept batch_no directly on items instead of requiring
+		# Serial and Batch Bundle documents. This is the v15 way.
+		if frappe.get_meta("Stock Entry").has_field("use_serial_batch_fields"):
+			issue_se.use_serial_batch_fields = 1
+
+		for gp_item in self.gate_pass_table:
+			# Use received_qty (Gate In) OR dispatched_qty (Gate Out) OR ordered_qty.
+			# Handles auto-created Gate Out passes re-assigned to JVE company.
+			received_qty = flt(gp_item.received_qty) or flt(gp_item.dispatched_qty) or flt(gp_item.ordered_qty)
+			if received_qty <= 0:
+				continue
+
+			ob_row = outbound_item_map.get(gp_item.order_item_name)
+			if not ob_row:
+				continue
+
+			# Transit warehouse = where JSB's outbound SE put the goods
+			transit_wh = ob_row.t_warehouse
+			if not transit_wh:
+				frappe.throw(
+					_("Outbound Stock Entry {0} item {1} has no target warehouse set.").format(
+						self.reference_number, gp_item.item_code
+					)
+				)
+
+			# Resolve batch from all possible sources
+			batch_no = self._resolve_batch_no(gp_item, ob_row)
+
+			issue_item = {
+				"item_code": gp_item.item_code,
+				"item_name": gp_item.item_name,
+				"qty": received_qty,
+				"uom": gp_item.uom or ob_row.uom,
+				"stock_uom": gp_item.stock_uom or ob_row.stock_uom,
+				"conversion_factor": flt(gp_item.conversion_factor) or 1.0,
+				"s_warehouse": transit_wh,
+				"batch_no": batch_no,
+				"basic_rate": flt(gp_item.rate) or flt(ob_row.basic_rate),
+				"cost_center": ob_row.cost_center,
+				"project": ob_row.project,
+			}
+			issue_se.append("items", issue_item)
+
+		if not issue_se.items:
+			frappe.throw(_("No items with received quantity found on Gate Pass {0}").format(self.name))
+
+		issue_se.insert(ignore_permissions=True)
+		issue_se.submit()
+
+		# ---- 3. Material Receipt in destination company (JVE) ----
+		receipt_se = frappe.new_doc("Stock Entry")
+		receipt_se.stock_entry_type = "Material Receipt"
+		receipt_se.company = dst_company
+		receipt_se.posting_date = self.gate_pass_date or nowdate()
+		receipt_se.posting_time = self.gate_pass_time or nowtime()
+		receipt_se.set_posting_time = 1
+		receipt_se.remarks = _("Auto-created by Gate Pass {0} – inter-company transfer in").format(self.name)
+
+		# Tell ERPNext to accept batch_no directly on items
+		if frappe.get_meta("Stock Entry").has_field("use_serial_batch_fields"):
+			receipt_se.use_serial_batch_fields = 1
+
+		for gp_item in self.gate_pass_table:
+			# Use received_qty (Gate In) OR dispatched_qty (Gate Out) OR ordered_qty.
+			# Handles auto-created Gate Out passes re-assigned to JVE company.
+			received_qty = flt(gp_item.received_qty) or flt(gp_item.dispatched_qty) or flt(gp_item.ordered_qty)
+			if received_qty <= 0:
+				continue
+
+			ob_row = outbound_item_map.get(gp_item.order_item_name)
+
+			# Target warehouse for JVE is taken from the Gate Pass row.
+			# But if it's from the wrong company (e.g. copied from source SE), ignore it.
+			dest_wh = gp_item.warehouse
+			if dest_wh:
+				wh_company = frappe.db.get_value("Warehouse", dest_wh, "company")
+				if wh_company != dst_company:
+					dest_wh = None
+
+			# Fall back to dynamically finding the Finished Goods warehouse for the receiving company
+			if not dest_wh:
+				# Look for any warehouse containing 'Finished Goods' for the destination company
+				found_wh = frappe.get_all(
+					"Warehouse",
+					filters={"company": dst_company, "is_group": 0, "name": ["like", "%Finished Goods%"]},
+					pluck="name",
+					limit=1
+				)
+				if found_wh:
+					dest_wh = found_wh[0]
+				else:
+					# Fallback to map if 'Finished Goods' is not found
+					dest_wh = INTERCOMPANY_DEST_WAREHOUSE_MAP.get(dst_company)
+
+			if not dest_wh:
+				frappe.throw(
+					_(
+						"No destination warehouse configured for company {0}. "
+						"Please set a warehouse in the Gate Pass item row, or add it to the "
+						"INTERCOMPANY_DEST_WAREHOUSE_MAP in gate_pass.py."
+					).format(dst_company)
+				)
+
+			# Validate the warehouse actually exists in the system
+			if not frappe.db.exists("Warehouse", dest_wh):
+				# Fetch up to 20 warehouses so the hint is actually useful
+				available = frappe.get_all(
+					"Warehouse",
+					filters={"company": dst_company, "is_group": 0},
+					pluck="name",
+					limit=20,
+				)
+				hint = (_(", ").join(available)) if available else _("(none found)")
+				frappe.throw(
+					_(
+						"Warehouse <b>{0}</b> does not exist in this system.<br>"
+						"Available warehouses for {1}: {2}<br><br>"
+						"Please create the warehouse first or update the INTERCOMPANY_DEST_WAREHOUSE_MAP "
+						"in gate_pass.py with the correct warehouse name."
+					).format(dest_wh, dst_company, hint)
+				)
+
+			batch_no = self._resolve_batch_no(gp_item, ob_row)
+
+			# Auto-create batch in destination company if needed
+			if batch_no:
+				self.ensure_batch_exists(batch_no, gp_item.item_code)
+
+			# Build receipt item with batch_no set directly
+			receipt_item = {
+				"item_code": gp_item.item_code,
+				"item_name": gp_item.item_name,
+				"qty": received_qty,
+				"uom": gp_item.uom or (ob_row.uom if ob_row else None),
+				"stock_uom": gp_item.stock_uom or (ob_row.stock_uom if ob_row else None),
+				"conversion_factor": flt(gp_item.conversion_factor) or 1.0,
+				"t_warehouse": dest_wh,
+				"batch_no": batch_no,
+				"basic_rate": flt(gp_item.rate) or (flt(ob_row.basic_rate) if ob_row else 0),
+			}
+			receipt_se.append("items", receipt_item)
+
+		if not receipt_se.items:
+			frappe.throw(_("No items to receive for Gate Pass {0}").format(self.name))
+
+		receipt_se.insert(ignore_permissions=True)
+		receipt_se.submit()
+
+		# ---- 4. Store references on the Gate Pass ----
+		self.db_set("intercompany_issue_entry", issue_se.name, update_modified=False)
+		self.db_set("intercompany_receipt_entry", receipt_se.name, update_modified=False)
+
+		frappe.msgprint(
+			_(
+				"Inter-company stock entries created successfully:<br>"
+				"• Material Issue in {0}: <b>{1}</b><br>"
+				"• Material Receipt in {2}: <b>{3}</b>"
+			).format(src_company, issue_se.name, dst_company, receipt_se.name),
+			title=_("Inter-Company Transfer Complete"),
+			indicator="green",
+		)
+
+	def _apply_batch_to_item(self, item_dict, item_code, warehouse, batch_no, qty, company, transaction_type):
+		"""
+		Apply batch tracking to a stock entry item dict.
+		Detects ERPNext version:
+		  - Old style (v13 / use_serial_batch_fields=1): sets batch_no directly
+		  - New style (v14+ bundle mode): creates Serial and Batch Bundle doc
+		"""
+		if not batch_no:
+			return  # Item is not batch-tracked or batch not found
+
+		# Detect whether we should use old-style batch_no or new-style bundle.
+		# Stock Settings 'use_serial_batch_fields' = 1 means old style is still active.
+		use_old_style = True
+		try:
+			use_sbb = frappe.db.get_single_value("Stock Settings", "use_serial_batch_fields")
+			# If use_serial_batch_fields = 1 → old style. If 0 or missing → bundle mode.
+			use_old_style = cint(use_sbb) == 1
+		except Exception:
+			use_old_style = True  # Default to old style if setting doesn't exist (v13)
+
+		if use_old_style:
+			# Old ERPNext: set batch_no directly on the item
+			item_dict["batch_no"] = batch_no
+			return
+
+		# New ERPNext v14+ bundle mode: create a Serial and Batch Bundle
+		try:
+			self.ensure_batch_exists(batch_no, item_code)
+			bundle = frappe.new_doc("Serial and Batch Bundle")
+			bundle.item_code = item_code
+			bundle.warehouse = warehouse
+			bundle.voucher_type = "Stock Entry"
+			bundle.type_of_transaction = transaction_type  # "Inward" or "Outward"
+			bundle.company = company
+			bundle.has_batch_no = 1
+			bundle.has_serial_no = 0
+			# Outward qty is negative, Inward is positive
+			entry_qty = -abs(flt(qty)) if transaction_type == "Outward" else abs(flt(qty))
+			bundle.append("entries", {
+				"batch_no": batch_no,
+				"qty": entry_qty,
+			})
+			bundle.flags.ignore_permissions = True
+			bundle.flags.ignore_mandatory = True
+			bundle.insert()
+			item_dict["serial_and_batch_bundle"] = bundle.name
+		except Exception as e:
+			# If bundle creation fails, fall back to direct batch_no as last resort
+			frappe.log_error(
+				message=frappe.get_traceback(),
+				title=f"Serial/Batch Bundle creation failed for {item_code} – falling back to batch_no",
+			)
+			item_dict["batch_no"] = batch_no
+
+	def _resolve_batch_no(self, gp_item, ob_row=None):
+		"""
+		Resolve batch_no using 5 fallback levels to cover all ERPNext versions:
+		  1. Gate Pass item's own batch_no field
+		  2. Outbound SE row's batch_no (direct field)
+		  2b. Outbound SE row's serial_and_batch_bundle (ERPNext v14+)
+		  3. Direct DB query on Stock Entry Detail batch_no field
+		  3b. Stock Entry Detail's serial_and_batch_bundle (ERPNext v14+)
+		  4. Stock Ledger Entry for the transit warehouse (most reliable fallback)
+		"""
+		# Level 1: gate pass item itself
+		batch_no = gp_item.batch_no
+		if batch_no:
+			return batch_no
+
+		# Level 2: matched outbound SE row — direct batch_no field
+		if ob_row:
+			batch_no = ob_row.batch_no or ob_row.get("batch_no")
+			if batch_no:
+				return batch_no
+
+			# Level 2b: serial_and_batch_bundle (ERPNext v14+)
+			bundle = ob_row.get("serial_and_batch_bundle")
+			if bundle:
+				batch_no = frappe.db.get_value(
+					"Serial and Batch Entry",
+					{"parent": bundle},
+					"batch_no",
+				)
+				if batch_no:
+					return batch_no
+
+		# Level 3: direct DB on Stock Entry Detail
+		if self.reference_number and gp_item.item_code:
+			row = frappe.db.get_value(
+				"Stock Entry Detail",
+				{"parent": self.reference_number, "item_code": gp_item.item_code},
+				["batch_no", "serial_and_batch_bundle"],
+				as_dict=True,
+			)
+			if row:
+				if row.get("batch_no"):
+					return row["batch_no"]
+				# Level 3b: bundle in Stock Entry Detail (ERPNext v14+)
+				if row.get("serial_and_batch_bundle"):
+					batch_no = frappe.db.get_value(
+						"Serial and Batch Entry",
+						{"parent": row["serial_and_batch_bundle"]},
+						"batch_no",
+					)
+					if batch_no:
+						return batch_no
+
+		# Level 4: Stock Ledger Entry for transit warehouse — most reliable
+		# Query what batch is actually sitting in the transit warehouse right now
+		if gp_item.item_code and self.reference_number:
+			try:
+				# Get transit warehouse from outbound SE item if available
+				transit_wh = ob_row.t_warehouse if ob_row else None
+				if transit_wh:
+					sle = frappe.db.get_value(
+						"Stock Ledger Entry",
+						{
+							"item_code": gp_item.item_code,
+							"warehouse": transit_wh,
+							"voucher_no": self.reference_number,
+							"is_cancelled": 0,
+						},
+						["batch_no", "serial_and_batch_bundle"],
+						as_dict=True,
+					)
+					if sle:
+						if sle.get("batch_no"):
+							return sle["batch_no"]
+						if sle.get("serial_and_batch_bundle"):
+							batch_no = frappe.db.get_value(
+								"Serial and Batch Entry",
+								{"parent": sle["serial_and_batch_bundle"]},
+								"batch_no",
+							)
+							if batch_no:
+								return batch_no
+			except Exception:
+				pass
+
+		return None
+
+	def ensure_batch_exists(self, batch_no, item_code):
+		"""
+		Create a Batch record if it does not already exist.
+		This prevents the Material Receipt from failing when the batch
+		originated in a different company and has never been seen in
+		the destination company's ledger.
+		"""
+		if not batch_no or not item_code:
+			return
+		if frappe.db.exists("Batch", batch_no):
+			return
+		try:
+			batch = frappe.new_doc("Batch")
+			batch.batch_id = batch_no
+			batch.item = item_code
+			batch.insert(ignore_permissions=True)
+		except Exception:
+			# If creation fails (e.g. already created by a parallel process) ignore
+			pass
 
 	def before_cancel(self):
 		"""
@@ -973,6 +1367,58 @@ class GatePass(Document):
 		message += _("4. Create a new receipt from the new Gate Pass")
 
 		frappe.throw(message, title=_("Cannot Amend Gate Pass"))
+
+
+@frappe.whitelist()
+def get_stock_entry_batches(stock_entry_name, item_code):
+	"""
+	Return all batch/roll numbers for a given item in a Stock Entry.
+	Supports both old-style (batch_no on Stock Entry Detail) and
+	ERPNext v14+ (serial_and_batch_bundle → Serial and Batch Entry).
+
+	Used by the Gate Pass info-button popup so the security guard can
+	verify which roll/batch numbers are physically being transferred.
+	"""
+	if not stock_entry_name or not item_code:
+		return []
+
+	rows = frappe.get_all(
+		"Stock Entry Detail",
+		filters={"parent": stock_entry_name, "item_code": item_code},
+		fields=["name", "batch_no", "qty", "uom", "stock_uom", "serial_and_batch_bundle"],
+		order_by="idx asc",
+	)
+
+	batches = []
+	for row in rows:
+		if row.get("batch_no"):
+			# Old-style: batch_no directly on the row
+			expiry = frappe.db.get_value("Batch", row.batch_no, "expiry_date")
+			batches.append({
+				"batch_no": row.batch_no,
+				"qty": flt(row.qty),
+				"uom": row.uom or row.stock_uom,
+				"expiry_date": str(expiry) if expiry else None,
+			})
+		elif row.get("serial_and_batch_bundle"):
+			# ERPNext v14+ style: look inside the bundle
+			bundle_entries = frappe.get_all(
+				"Serial and Batch Entry",
+				filters={"parent": row.serial_and_batch_bundle},
+				fields=["batch_no", "qty"],
+				order_by="idx asc",
+			)
+			for be in bundle_entries:
+				if be.get("batch_no"):
+					expiry = frappe.db.get_value("Batch", be.batch_no, "expiry_date")
+					batches.append({
+						"batch_no": be.batch_no,
+						"qty": abs(flt(be.qty)),
+						"uom": row.uom or row.stock_uom,
+						"expiry_date": str(expiry) if expiry else None,
+					})
+
+	return batches
 
 
 @frappe.whitelist()
@@ -1200,6 +1646,7 @@ def get_stock_entry_items_for_reference(stock_entry_name):
 		item = {
 			"item_code": row.item_code,
 			"item_name": row.item_name or "",
+			"batch_no": getattr(row, "batch_no", None),
 			"description": row.description or "",
 			"uom": row.uom or row.stock_uom,
 			"stock_uom": row.stock_uom,
@@ -1241,6 +1688,35 @@ def extract_transport_details(doc):
 		or doc.get("driver_phone")
 		or doc.get("contact_phone"),
 	}
+
+@frappe.whitelist()
+def get_origin_vehicle_details(reference_number):
+	"""
+	For an inter-company Gate In against a Stock Entry,
+	find the original Gate Out and return its vehicle and driver details.
+	"""
+	gate_pass = frappe.db.get_value(
+		"Gate Pass", 
+		{
+			"reference_number": reference_number,
+			"entry_type": "Gate Out"
+		}, 
+		["vehicle_number", "driver_name", "driver_contact"], 
+		as_dict=True
+	)
+	
+	if not gate_pass:
+		gate_pass = frappe.db.get_value(
+			"Gate Pass", 
+			{
+				"outbound_material_transfer": reference_number,
+				"entry_type": "Gate Out"
+			}, 
+			["vehicle_number", "driver_name", "driver_contact"], 
+			as_dict=True
+		)
+
+	return gate_pass or {}
 
 
 def extract_compliance_details(doc, document_reference):
@@ -2243,7 +2719,26 @@ def on_stock_entry_submit(doc, method):
 		return
 
 	if utils.is_material_transfer(doc) and not utils.is_external_transfer(doc):
-		return
+		# Even without the External Transfer checkbox, if the target warehouse
+		# belongs to a DIFFERENT company this is always an external (inter-company)
+		# movement and must have a Gate Pass.
+		is_intercompany = False
+		transfer_to_company = getattr(doc, "transfer_to_company", None)
+		party = getattr(doc, "party", None)
+		
+		if transfer_to_company and transfer_to_company != doc.company:
+			is_intercompany = True
+		elif party and party != doc.company:
+			is_intercompany = True
+		else:
+			for item in doc.items:
+				if item.t_warehouse:
+					wh_company = frappe.db.get_value("Warehouse", item.t_warehouse, "company")
+					if wh_company and wh_company != doc.company:
+						is_intercompany = True
+						break
+		if not is_intercompany:
+			return
 
 	frappe.enqueue(
 		utils.create_gate_pass_from_stock_entry,

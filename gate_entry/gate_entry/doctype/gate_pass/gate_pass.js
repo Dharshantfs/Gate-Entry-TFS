@@ -7,6 +7,18 @@ const DOCUMENT_REFERENCES = [
 	...new Set([...INBOUND_REFERENCES, ...OUTBOUND_REFERENCES, STOCK_ENTRY_REFERENCE]),
 ];
 
+// Inter-company warehouse mapping:
+// When a Gate In is switched to a specific receiving company,
+// auto-fill all item warehouses with the mapped destination warehouse.
+const INTERCOMPANY_WAREHOUSE_MAP = {
+	"J Vasanth Exports": "Finished Goods Warehouse - JVE",
+	"Thusma SMS Nonwovens Private Limited - 1Z0": "Finished Goods Warehouse - TSNPL",
+	"Varshine Tex (Puducherry)": "Raw Materials Warehouse  - VTP",
+};
+
+// The transit warehouse used by JSB for inter-company transfers
+const JSB_TRANSIT_WAREHOUSE = "Goods In Transit - JSB-1ZT";
+
 frappe.ui.form.on("Gate Pass", {
 	onload_post_render(frm) {
 		// Initialize the custom UI component after form is fully rendered
@@ -89,6 +101,45 @@ frappe.ui.form.on("Gate Pass", {
 			};
 		});
 
+		if (frm.is_new()) {
+			frm.add_custom_button(__("Scan QR"), function() {
+				if (frappe.ui.Scanner) {
+					new frappe.ui.Scanner({
+						dialog: true,
+						multiple: false,
+						on_scan(data) {
+							if (data && data.decodedText) {
+								process_qr_scan(frm, data.decodedText);
+							} else if (typeof data === "string") {
+								process_qr_scan(frm, data);
+							}
+						}
+					});
+				} else {
+					let d = new frappe.ui.Dialog({
+						title: 'Scan QR Code',
+						fields: [{
+							label: 'Scan Here',
+							fieldname: 'qr_data',
+							fieldtype: 'Small Text'
+						}],
+						primary_action_label: 'Apply',
+						primary_action(values) {
+							process_qr_scan(frm, values.qr_data);
+							d.hide();
+						}
+					});
+					d.show();
+				}
+			}, __("Actions"));
+		}
+
+		if (!frm.doc.driver_photo && frm.doc.docstatus === 0) {
+			frm.add_custom_button(__("Capture Driver Photo"), function() {
+				capture_driver_photo(frm);
+			}, __("Actions"));
+		}
+
 		refresh_compliance_status(frm);
 	},
 	onload(frm) {
@@ -99,6 +150,31 @@ frappe.ui.form.on("Gate Pass", {
 				},
 			};
 		});
+	},
+
+	before_submit(frm) {
+		if (!frm.doc.driver_photo) {
+			frappe.msgprint(__("Driver Photo is mandatory before submitting."));
+			frappe.validated = false;
+		}
+	},
+
+	before_save(frm) {
+		let vehicle_changed = frm.doc.fetched_vehicle_number && frm.doc.vehicle_number !== frm.doc.fetched_vehicle_number;
+		let driver_changed = frm.doc.fetched_driver_name && frm.doc.driver_name !== frm.doc.fetched_driver_name;
+		
+		if ((vehicle_changed || driver_changed) && !frm.doc.driver_change_remarks) {
+			frappe.validated = false;
+			frappe.prompt({
+				label: __('Reason for changing Driver/Vehicle'),
+				fieldname: 'remarks',
+				fieldtype: 'Small Text',
+				reqd: 1
+			}, (values) => {
+				frm.set_value('driver_change_remarks', values.remarks);
+				frm.save();
+			}, __('Remarks Required'), __('Save'));
+		}
 	},
 
 	after_save(frm) {
@@ -137,7 +213,10 @@ frappe.ui.form.on("Gate Pass", {
 
 		// Update entry type locally for better UX
 		if (frm.doc.document_reference === STOCK_ENTRY_REFERENCE) {
-			frm.set_value("entry_type", "Gate Out");
+			// If the selected company is a known inter-company RECEIVER (e.g. JVE receiving from JSB),
+			// default entry_type to Gate In. Otherwise default to Gate Out (sender side).
+			const is_intercompany_receiver = !!INTERCOMPANY_WAREHOUSE_MAP[frm.doc.company];
+			frm.set_value("entry_type", is_intercompany_receiver ? "Gate In" : "Gate Out");
 			frm.set_value("supplier", null);
 			frm.set_value("supplier_delivery_note", null);
 		} else if (is_outbound_reference(frm.doc.document_reference, "Gate Out")) {
@@ -212,7 +291,143 @@ frappe.ui.form.on("Gate Pass", {
 		// keep guidance in sync
 		show_stock_entry_guidance(frm);
 	},
+
+	company(frm) {
+		// When the company is changed on a Gate In (inter-company transfer),
+		// auto-set the warehouse for all items to the mapped destination warehouse.
+		auto_set_intercompany_warehouses(frm);
+	},
 });
+
+function capture_driver_photo(frm) {
+	let d = new frappe.ui.Dialog({
+		title: __("Capture Driver Photo"),
+		fields: [
+			{
+				fieldtype: "HTML",
+				fieldname: "video_container",
+				options: `
+					<div style="text-align:center;">
+						<video id="driver_video" width="100%" height="auto" autoplay playsinline></video>
+						<canvas id="driver_canvas" style="display:none;"></canvas>
+					</div>
+				`
+			}
+		],
+		primary_action_label: __("Capture & Attach"),
+		primary_action: function() {
+			let video = document.getElementById("driver_video");
+			let canvas = document.getElementById("driver_canvas");
+			if (!video || !canvas) return;
+			
+			canvas.width = video.videoWidth;
+			canvas.height = video.videoHeight;
+			canvas.getContext("2d").drawImage(video, 0, 0);
+			
+			let data_url = canvas.toDataURL("image/jpeg");
+			let filename = "Driver_Photo_" + frappe.datetime.now_datetime().replace(/[-:\s]/g, "") + ".jpg";
+			
+			fetch(data_url)
+				.then(res => res.blob())
+				.then(blob => {
+					let file = new File([blob], filename, { type: "image/jpeg" });
+					
+					// Upload using frappe upload API
+					new frappe.ui.FileUploader({
+						files: [file],
+						doctype: frm.doc.doctype,
+						docname: frm.doc.name,
+						fieldname: "driver_photo",
+						is_private: 0,
+						on_success: (file_doc) => {
+							frm.set_value("driver_photo", file_doc.file_url);
+							d.hide();
+						}
+					});
+				});
+		}
+	});
+
+	d.on_page_show = () => {
+		let video = document.getElementById("driver_video");
+		if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+			navigator.mediaDevices.getUserMedia({ video: true })
+				.then(stream => {
+					video.srcObject = stream;
+					d.stream = stream;
+				})
+				.catch(err => {
+					frappe.msgprint(__("Camera access denied or not available."));
+				});
+		} else {
+			frappe.msgprint(__("Camera API not supported in this browser."));
+		}
+	};
+
+	d.onhide = () => {
+		if (d.stream) {
+			d.stream.getTracks().forEach(track => track.stop());
+		}
+	};
+
+	d.show();
+}
+
+/**
+ * Auto-fill item warehouses when the Gate Pass company is changed
+ * to a company that has a mapped destination warehouse.
+ */
+function auto_set_intercompany_warehouses(frm) {
+	// Only apply for Gate In on Stock Entry references
+	if (
+		frm.doc.entry_type !== "Gate In" ||
+		frm.doc.document_reference !== STOCK_ENTRY_REFERENCE
+	) {
+		return;
+	}
+
+	const company = frm.doc.company;
+	if (!company) return;
+
+	// Check if the selected company has a mapped destination warehouse
+	const dest_warehouse = INTERCOMPANY_WAREHOUSE_MAP[company];
+	if (!dest_warehouse) return;
+
+	// Update warehouse for every row in the child table
+	const table = frm.doc.gate_pass_table || [];
+	if (!table.length) {
+		if (frm.gate_pass_ui) {
+			// Items may be in the custom UI only – update them there too
+			(frm.gate_pass_ui.items || []).forEach((item) => {
+				item.warehouse = dest_warehouse;
+			});
+			frm.gate_pass_ui.sync_to_child_table();
+			frm.gate_pass_ui.render();
+		}
+		return;
+	}
+
+	table.forEach((row) => {
+		frappe.model.set_value(row.doctype, row.name, "warehouse", dest_warehouse);
+	});
+
+	// Sync warehouse into the custom UI items array as well
+	if (frm.gate_pass_ui) {
+		(frm.gate_pass_ui.items || []).forEach((item) => {
+			item.warehouse = dest_warehouse;
+		});
+		frm.gate_pass_ui.sync_to_child_table();
+		frm.gate_pass_ui.render();
+	}
+
+	frappe.show_alert({
+		message: __(
+			"Warehouse auto-set to {0} for all items",
+			[dest_warehouse]
+		),
+		indicator: "blue",
+	});
+}
 
 /**
  * Setup receipt creation buttons
@@ -423,6 +638,39 @@ function load_reference_details(frm) {
 			console.log("Updates: ", updates);
 			frm.set_value(updates).then(() => {
 				frm.refresh();
+				if (frm.doc.document_reference === "Stock Entry" && frm.doc.entry_type === "Gate In") {
+					frappe.call({
+						method: "gate_entry.gate_entry.doctype.gate_pass.gate_pass.get_origin_vehicle_details",
+						args: { reference_number: frm.doc.reference_number },
+						callback(r) {
+							if (r.message && Object.keys(r.message).length > 0) {
+								let origin_updates = {};
+								if (!frm.doc.vehicle_number && r.message.vehicle_number) {
+									origin_updates.vehicle_number = r.message.vehicle_number;
+								}
+								if (!frm.doc.driver_name && r.message.driver_name) {
+									origin_updates.driver_name = r.message.driver_name;
+								}
+								if (!frm.doc.driver_contact && r.message.driver_contact) {
+									origin_updates.driver_contact = r.message.driver_contact;
+								}
+								
+								if (Object.keys(origin_updates).length > 0) {
+									frm.set_value(origin_updates).then(() => {
+										frm.set_value("fetched_vehicle_number", frm.doc.vehicle_number);
+										frm.set_value("fetched_driver_name", frm.doc.driver_name);
+									});
+								} else {
+									frm.set_value("fetched_vehicle_number", frm.doc.vehicle_number);
+									frm.set_value("fetched_driver_name", frm.doc.driver_name);
+								}
+							}
+						}
+					});
+				} else {
+					frm.set_value("fetched_vehicle_number", frm.doc.vehicle_number);
+					frm.set_value("fetched_driver_name", frm.doc.driver_name);
+				}
 			});
 		},
 	});
@@ -448,18 +696,34 @@ function set_gate_pass_items(frm, items) {
 	frm.clear_table("gate_pass_table");
 	// fetch the value of manual_return_flow
 	const is_return_flow = parseInt(frm.doc.manual_return_flow || 0) === 1;
-	console.log("Is return flow: ", is_return_flow);
+
+	// For inter-company Gate In (e.g. JVE receiving from JSB), clear the source
+	// warehouse so we don't accidentally set a JSB warehouse on a JVE gate pass.
+	// The gate_pass_table warehouse is a Link field — setting an invalid name crashes.
+	// The Python on_submit will use INTERCOMPANY_DEST_WAREHOUSE_MAP to fill it.
+	const is_intercompany_gate_in =
+		frm.doc.entry_type === "Gate In" &&
+		frm.doc.document_reference === "Stock Entry" &&
+		INTERCOMPANY_WAREHOUSE_MAP[frm.doc.company];
+
 	(items || []).forEach((item) => {
 		const row = frm.add_child("gate_pass_table");
 		row.item_code = item.item_code;
 		row.item_name = item.item_name || "";
+		row.batch_no = item.batch_no || "";
 		row.description = item.description || "";
 		row.uom = item.uom || "";
 		row.stock_uom = item.stock_uom || "";
 		row.conversion_factor = item.conversion_factor || 1.0;
 		row.ordered_qty = item.ordered_qty || 0;
-		row.received_qty = is_return_flow ? item.received_qty : 0;
-		row.dispatched_qty = item.dispatched_qty || 0;
+		// For inter-company Gate In pre-fill received_qty = ordered_qty
+		// so guard sees what was dispatched; they can reduce if short-received.
+		if (is_intercompany_gate_in) {
+			row.received_qty = item.ordered_qty || 0;
+		} else {
+			row.received_qty = is_return_flow ? item.received_qty : 0;
+		}
+		row.dispatched_qty = item.dispatched_qty || item.ordered_qty || 0;
 		row.pending_qty = item.pending_qty || 0;
 		row.is_rate_contract = item.is_rate_contract || 0;
 		row.rate = item.rate || 0;
@@ -470,7 +734,10 @@ function set_gate_pass_items(frm, items) {
 			? item.dispatched_qty || 0
 			: item.received_qty || 0;
 		row.amount = qty_for_amount * (item.rate || 0);
-		row.warehouse = item.warehouse || "";
+		// For inter-company Gate In: clear warehouse (avoid Link field validation crash).
+		// Guard can leave blank; Python on_submit fills it from INTERCOMPANY_DEST_WAREHOUSE_MAP.
+		// For same-company: use the warehouse from reference document.
+		row.warehouse = is_intercompany_gate_in ? "" : (item.warehouse || "");
 		row.rejected_warehouse = item.rejected_warehouse || "";
 		row.expense_account = item.expense_account || "";
 		row.cost_center = item.cost_center || "";
@@ -485,6 +752,16 @@ function set_gate_pass_items(frm, items) {
 
 	if (frm.gate_pass_ui) {
 		frm.gate_pass_ui.refresh();
+	}
+
+	// Inform user that received qty is pre-filled from dispatched qty
+	if (is_intercompany_gate_in) {
+		frappe.show_alert({
+			message: __(
+				"Received Qty pre-filled from dispatched quantity. Adjust if any shortage."
+			),
+			indicator: "blue",
+		});
 	}
 }
 
@@ -644,4 +921,43 @@ function show_stock_entry_guidance(frm) {
 			"orange"
 		);
 	}
+}
+
+function process_qr_scan(frm, qr_text) {
+	if (!qr_text) return;
+	
+	let data = {};
+	qr_text.split('\n').forEach(line => {
+		if (line.includes(':')) {
+			let parts = line.split(':');
+			let key = parts[0].trim().toLowerCase();
+			let val = parts.slice(1).join(':').trim();
+			data[key] = val;
+		}
+	});
+
+	// Keys expected based on user format:
+	// Company: Jayashree Spun Bond - 1ZT (origin, we ignore)
+	// Challan No: MAT-STE-01546
+	// DocType: Stock Entry
+	// Date: 2026-05-21
+	// Party: J Vasanth Exports
+	
+	let doctype = data["doctype"];
+	if (!doctype) return frappe.msgprint(__("Invalid QR: DocType not found."));
+
+	// Set document_reference first so the trigger runs, then set reference_number
+	frm.set_value("document_reference", doctype).then(() => {
+		if (data["party"]) {
+			frm.set_value("company", data["party"]);
+		}
+		
+		frm.set_value("entry_type", "Gate In");
+		
+		if (data["challan no"]) {
+			frm.set_value("reference_number", data["challan no"]);
+		}
+		
+		frappe.show_alert({message: __('QR Code applied successfully'), indicator: 'green'});
+	});
 }

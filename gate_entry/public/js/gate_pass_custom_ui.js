@@ -598,7 +598,10 @@ class GatePassCustomUI {
 				conversion_factor: item.conversion_factor || 1.0,
 				// Quantities
 				ordered_qty: item.ordered_qty || 0,
-				received_qty: 0, // Default to 0, user will enter
+				received_qty:
+					this.isGateIn() && this.isStockEntry()
+						? parseFloat(item.pending_qty || item.ordered_qty || item.received_qty || 0)
+						: 0,
 				dispatched_qty: item.dispatched_qty || 0,
 				pending_qty: item.pending_qty || 0,
 				is_rate_contract: item.is_rate_contract || 0,
