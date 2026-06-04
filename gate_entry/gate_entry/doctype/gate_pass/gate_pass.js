@@ -7,14 +7,20 @@ const DOCUMENT_REFERENCES = [
 	...new Set([...INBOUND_REFERENCES, ...OUTBOUND_REFERENCES, STOCK_ENTRY_REFERENCE]),
 ];
 
-// Inter-company warehouse mapping:
-// When a Gate In is switched to a specific receiving company,
-// auto-fill all item warehouses with the mapped destination warehouse.
+// Inter-company Gate In (Stock Entry, Material Transfer): company → destination warehouse.
+// Keep in sync with INTERCOMPANY_MATERIAL_TRANSFER_DEST_WAREHOUSE_MAP in gate_entry/constants.py.
 const INTERCOMPANY_WAREHOUSE_MAP = {
 	"J Vasanth Exports": "Finished Goods Warehouse - JVE",
 	"Thusma SMS Nonwovens Private Limited - 1Z0": "Finished Goods Warehouse - TSNPL",
+	"Jayashree Spun Bond - 2ZS": "Finished Goods - JSB-2ZS",
+	"Thusma SMS Nonwoven Private Limited - 2ZZ": "Finished Goods Warehouse - TSNPL-2ZZ",
+	"Varshine Tex (Odisha)": "Finished Goods Warehouse - VTO",
+	"Thusma T Tex": "Finished Goods Warehouse - TTT",
+	"Varshine Retails Private Limited": "Finished Goods Warehouse - VRPL",
 	"Varshine Tex (Puducherry)": "Raw Materials Warehouse  - VTP",
 };
+
+const MATERIAL_TRANSFER_STOCK_ENTRY_TYPE = "Material Transfer";
 
 // The transit warehouse used by JSB for inter-company transfers
 const JSB_TRANSIT_WAREHOUSE = "Goods In Transit - JSB-1ZT";
@@ -264,6 +270,7 @@ frappe.ui.form.on("Gate Pass", {
 				clear_compliance_status(frm);
 			}
 		} else {
+			frm._referenced_stock_entry_type = null;
 			clear_compliance_status(frm);
 		}
 
@@ -373,16 +380,41 @@ function capture_driver_photo(frm) {
 	d.show();
 }
 
+function cache_referenced_stock_entry_type(frm) {
+	if (
+		frm.doc.document_reference !== STOCK_ENTRY_REFERENCE ||
+		!frm.doc.reference_number
+	) {
+		frm._referenced_stock_entry_type = null;
+		return Promise.resolve();
+	}
+
+	return frappe.db
+		.get_value(
+			"Stock Entry",
+			frm.doc.reference_number,
+			"stock_entry_type"
+		)
+		.then((r) => {
+			frm._referenced_stock_entry_type = r?.stock_entry_type || null;
+		});
+}
+
+function is_intercompany_material_transfer_gate_in(frm) {
+	return (
+		frm.doc.entry_type === "Gate In" &&
+		frm.doc.document_reference === STOCK_ENTRY_REFERENCE &&
+		frm._referenced_stock_entry_type === MATERIAL_TRANSFER_STOCK_ENTRY_TYPE &&
+		!!INTERCOMPANY_WAREHOUSE_MAP[frm.doc.company]
+	);
+}
+
 /**
  * Auto-fill item warehouses when the Gate Pass company is changed
  * to a company that has a mapped destination warehouse.
  */
 function auto_set_intercompany_warehouses(frm) {
-	// Only apply for Gate In on Stock Entry references
-	if (
-		frm.doc.entry_type !== "Gate In" ||
-		frm.doc.document_reference !== STOCK_ENTRY_REFERENCE
-	) {
+	if (!is_intercompany_material_transfer_gate_in(frm)) {
 		return;
 	}
 
@@ -677,19 +709,27 @@ function load_reference_details(frm) {
 }
 
 function load_reference_items(frm) {
-	frappe.call({
-		method: "gate_entry.gate_entry.doctype.gate_pass.gate_pass.get_items",
-		args: {
-			document_reference: frm.doc.document_reference,
-			reference_number: frm.doc.reference_number,
-		},
-		freeze: true,
-		freeze_message: __("Loading items from reference document..."),
-		callback(response) {
-			const items = response.message || [];
-			set_gate_pass_items(frm, items);
-		},
-	});
+	const fetchItems = () => {
+		frappe.call({
+			method: "gate_entry.gate_entry.doctype.gate_pass.gate_pass.get_items",
+			args: {
+				document_reference: frm.doc.document_reference,
+				reference_number: frm.doc.reference_number,
+			},
+			freeze: true,
+			freeze_message: __("Loading items from reference document..."),
+			callback(response) {
+				const items = response.message || [];
+				set_gate_pass_items(frm, items);
+			},
+		});
+	};
+
+	if (frm.doc.document_reference === STOCK_ENTRY_REFERENCE) {
+		cache_referenced_stock_entry_type(frm).then(fetchItems);
+	} else {
+		fetchItems();
+	}
 }
 
 function set_gate_pass_items(frm, items) {
@@ -700,11 +740,8 @@ function set_gate_pass_items(frm, items) {
 	// For inter-company Gate In (e.g. JVE receiving from JSB), clear the source
 	// warehouse so we don't accidentally set a JSB warehouse on a JVE gate pass.
 	// The gate_pass_table warehouse is a Link field — setting an invalid name crashes.
-	// The Python on_submit will use INTERCOMPANY_DEST_WAREHOUSE_MAP to fill it.
-	const is_intercompany_gate_in =
-		frm.doc.entry_type === "Gate In" &&
-		frm.doc.document_reference === "Stock Entry" &&
-		INTERCOMPANY_WAREHOUSE_MAP[frm.doc.company];
+	// Python on_submit uses INTERCOMPANY_MATERIAL_TRANSFER_DEST_WAREHOUSE_MAP to fill it.
+	const is_intercompany_gate_in = is_intercompany_material_transfer_gate_in(frm);
 
 	(items || []).forEach((item) => {
 		const row = frm.add_child("gate_pass_table");
@@ -735,7 +772,7 @@ function set_gate_pass_items(frm, items) {
 			: item.received_qty || 0;
 		row.amount = qty_for_amount * (item.rate || 0);
 		// For inter-company Gate In: clear warehouse (avoid Link field validation crash).
-		// Guard can leave blank; Python on_submit fills it from INTERCOMPANY_DEST_WAREHOUSE_MAP.
+		// Guard can leave blank; Python on_submit fills from the inter-company warehouse map.
 		// For same-company: use the warehouse from reference document.
 		row.warehouse = is_intercompany_gate_in ? "" : (item.warehouse || "");
 		row.rejected_warehouse = item.rejected_warehouse || "";
@@ -754,8 +791,8 @@ function set_gate_pass_items(frm, items) {
 		frm.gate_pass_ui.refresh();
 	}
 
-	// Inform user that received qty is pre-filled from dispatched qty
 	if (is_intercompany_gate_in) {
+		auto_set_intercompany_warehouses(frm);
 		frappe.show_alert({
 			message: __(
 				"Received Qty pre-filled from dispatched quantity. Adjust if any shortage."

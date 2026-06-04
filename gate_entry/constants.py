@@ -21,3 +21,18 @@ REFERENCE_TOTAL_FIELDS = (
 	"total",
 	"base_total",
 )
+
+# Inter-company Gate In (Stock Entry, Material Transfer): receiving company → destination warehouse.
+# Keep gate_pass.js INTERCOMPANY_WAREHOUSE_MAP in sync.
+INTERCOMPANY_MATERIAL_TRANSFER_DEST_WAREHOUSE_MAP = {
+	"J Vasanth Exports": "Finished Goods Warehouse - JVE",
+	"Thusma SMS Nonwovens Private Limited - 1Z0": "Finished Goods Warehouse - TSNPL",
+	"Jayashree Spun Bond - 2ZS": "Finished Goods - JSB-2ZS",
+	"Thusma SMS Nonwoven Private Limited - 2ZZ": "Finished Goods Warehouse - TSNPL-2ZZ",
+	"Varshine Tex (Odisha)": "Finished Goods Warehouse - VTO",
+	"Thusma T Tex": "Finished Goods Warehouse - TTT",
+	"Varshine Retails Private Limited": "Finished Goods Warehouse - VRPL",
+	"Varshine Tex (Puducherry)": "Raw Materials Warehouse  - VTP",
+}
+
+MATERIAL_TRANSFER_STOCK_ENTRY_TYPE = "Material Transfer"

@@ -10,6 +10,8 @@ from frappe.utils import cint, cstr, flt, nowdate, nowtime
 
 from gate_entry.constants import (
 	INBOUND_REFERENCES,
+	INTERCOMPANY_MATERIAL_TRANSFER_DEST_WAREHOUSE_MAP,
+	MATERIAL_TRANSFER_STOCK_ENTRY_TYPE,
 	OUTBOUND_REFERENCES,
 	REFERENCE_TOTAL_FIELDS,
 )
@@ -17,14 +19,8 @@ from gate_entry.stock_integration import utils as stock_utils
 
 logger = frappe.logger("Gate Pass")
 
-# Inter-company destination warehouse mapping.
-# When a Gate In is submitted under a receiving company, items with no
-# warehouse set on the Gate Pass row will fall back to this warehouse.
-INTERCOMPANY_DEST_WAREHOUSE_MAP = {
-	"J Vasanth Exports": "Finished Goods Warehouse - JVE",
-	"Thusma SMS Nonwovens Private Limited - 1Z0": "Finished Goods Warehouse - TSNPL",
-	"Varshine Tex (Puducherry)": "Raw Materials Warehouse  - VTP",
-}
+# Re-export for backwards compatibility; canonical map is in gate_entry.constants.
+INTERCOMPANY_DEST_WAREHOUSE_MAP = INTERCOMPANY_MATERIAL_TRANSFER_DEST_WAREHOUSE_MAP
 
 # Transit warehouse on the sending company side (JSB).
 JSB_TRANSIT_WAREHOUSE = "Goods In Transit - JSB-1ZT"
@@ -967,27 +963,34 @@ class GatePass(Document):
 				if wh_company != dst_company:
 					dest_wh = None
 
-			# Fall back to dynamically finding the Finished Goods warehouse for the receiving company
+			# Material Transfer Gate In: use configured destination warehouse first
+			# (e.g. Raw Materials for VTP — avoid picking the wrong Finished Goods warehouse).
+			if (
+				not dest_wh
+				and outbound_se.stock_entry_type == MATERIAL_TRANSFER_STOCK_ENTRY_TYPE
+			):
+				dest_wh = INTERCOMPANY_MATERIAL_TRANSFER_DEST_WAREHOUSE_MAP.get(dst_company)
+
+			# Fall back to any Finished Goods warehouse for the receiving company
 			if not dest_wh:
-				# Look for any warehouse containing 'Finished Goods' for the destination company
 				found_wh = frappe.get_all(
 					"Warehouse",
 					filters={"company": dst_company, "is_group": 0, "name": ["like", "%Finished Goods%"]},
 					pluck="name",
-					limit=1
+					limit=1,
 				)
 				if found_wh:
 					dest_wh = found_wh[0]
-				else:
-					# Fallback to map if 'Finished Goods' is not found
-					dest_wh = INTERCOMPANY_DEST_WAREHOUSE_MAP.get(dst_company)
+
+			if not dest_wh:
+				dest_wh = INTERCOMPANY_MATERIAL_TRANSFER_DEST_WAREHOUSE_MAP.get(dst_company)
 
 			if not dest_wh:
 				frappe.throw(
 					_(
 						"No destination warehouse configured for company {0}. "
-						"Please set a warehouse in the Gate Pass item row, or add it to the "
-						"INTERCOMPANY_DEST_WAREHOUSE_MAP in gate_pass.py."
+						"Please set a warehouse in the Gate Pass item row, or add it to "
+						"INTERCOMPANY_MATERIAL_TRANSFER_DEST_WAREHOUSE_MAP in gate_entry/constants.py."
 					).format(dst_company)
 				)
 
@@ -1005,8 +1008,8 @@ class GatePass(Document):
 					_(
 						"Warehouse <b>{0}</b> does not exist in this system.<br>"
 						"Available warehouses for {1}: {2}<br><br>"
-						"Please create the warehouse first or update the INTERCOMPANY_DEST_WAREHOUSE_MAP "
-						"in gate_pass.py with the correct warehouse name."
+						"Please create the warehouse first or update "
+						"INTERCOMPANY_MATERIAL_TRANSFER_DEST_WAREHOUSE_MAP in gate_entry/constants.py."
 					).format(dest_wh, dst_company, hint)
 				)
 
