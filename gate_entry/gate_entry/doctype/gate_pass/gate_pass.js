@@ -736,6 +736,7 @@ function set_gate_pass_items(frm, items) {
 	frm.clear_table("gate_pass_table");
 	// fetch the value of manual_return_flow
 	const is_return_flow = parseInt(frm.doc.manual_return_flow || 0) === 1;
+	const is_gate_in = frm.doc.entry_type === "Gate In";
 
 	// For inter-company Gate In (e.g. JVE receiving from JSB), clear the source
 	// warehouse so we don't accidentally set a JSB warehouse on a JVE gate pass.
@@ -757,10 +758,18 @@ function set_gate_pass_items(frm, items) {
 		// so guard sees what was dispatched; they can reduce if short-received.
 		if (is_intercompany_gate_in) {
 			row.received_qty = item.ordered_qty || 0;
+			row.dispatched_qty = 0;
+		} else if (is_gate_in) {
+			// For Gate In against Stock Entry:
+			// - normal flow: received_qty should come from the reference Stock Entry
+			// - manual_return_flow: we don't have received quantities yet
+			row.received_qty = is_return_flow ? 0 : item.received_qty || 0;
+			row.dispatched_qty = 0;
 		} else {
-			row.received_qty = is_return_flow ? item.received_qty : 0;
+			// Gate Out
+			row.received_qty = 0;
+			row.dispatched_qty = item.dispatched_qty || item.ordered_qty || 0;
 		}
-		row.dispatched_qty = item.dispatched_qty || item.ordered_qty || 0;
 		row.pending_qty = item.pending_qty || 0;
 		row.is_rate_contract = item.is_rate_contract || 0;
 		row.rate = item.rate || 0;
@@ -768,8 +777,8 @@ function set_gate_pass_items(frm, items) {
 			frm.doc.document_reference,
 			frm.doc.entry_type
 		)
-			? item.dispatched_qty || 0
-			: item.received_qty || 0;
+			? row.dispatched_qty || 0
+			: row.received_qty || 0;
 		row.amount = qty_for_amount * (item.rate || 0);
 		// For inter-company Gate In: clear warehouse (avoid Link field validation crash).
 		// Guard can leave blank; Python on_submit fills from the inter-company warehouse map.

@@ -476,9 +476,9 @@ class GatePass(Document):
 
 		items = []
 		for row in stock_entry.items:
-			transfer_qty = flt(getattr(row, "transfer_qty", row.qty))
+			transfer_qty = abs(flt(getattr(row, "transfer_qty", row.qty)))
 			dispatched_qty = 0 if is_gate_in else transfer_qty
-			received_qty = 0
+			received_qty = transfer_qty if is_gate_in else 0
 			pending_qty = transfer_qty
 
 			items.append(
@@ -497,7 +497,7 @@ class GatePass(Document):
 					"is_rate_contract": 0,
 					"rate": flt(row.basic_rate) or 0,
 					"amount": flt(row.basic_amount) or 0,
-					"warehouse": row.s_warehouse or row.t_warehouse,
+					"warehouse": (row.t_warehouse if is_gate_in else row.s_warehouse) or row.s_warehouse or row.t_warehouse,
 					"rejected_warehouse": None,
 					"expense_account": None,
 					"cost_center": row.cost_center,
@@ -1643,8 +1643,11 @@ def get_stock_entry_items_for_reference(stock_entry_name):
 
 	items = []
 	for row in stock_entry.items:
-		transfer_qty = flt(getattr(row, "transfer_qty", row.qty))
+		transfer_qty = abs(flt(getattr(row, "transfer_qty", row.qty)))
 		logger.info(f"Stock Entry Item: {row.as_dict()}")
+
+		received_qty = transfer_qty if is_return else 0
+		dispatched_qty = 0 if is_return else transfer_qty
 
 		item = {
 			"item_code": row.item_code,
@@ -1655,13 +1658,13 @@ def get_stock_entry_items_for_reference(stock_entry_name):
 			"stock_uom": row.stock_uom,
 			"conversion_factor": flt(row.conversion_factor) or 1.0,
 			"ordered_qty": transfer_qty,
-			"received_qty": 0,
-			"dispatched_qty": 0 if is_return else transfer_qty,
+			"received_qty": received_qty,
+			"dispatched_qty": dispatched_qty,
 			"pending_qty": transfer_qty,
 			"is_rate_contract": 0,
 			"rate": flt(row.basic_rate) or 0,
 			"amount": flt(row.basic_amount) or 0,
-			"warehouse": row.s_warehouse or row.t_warehouse,
+			"warehouse": (row.t_warehouse if is_return else row.s_warehouse) or row.s_warehouse or row.t_warehouse,
 			"rejected_warehouse": None,
 			"expense_account": None,
 			"cost_center": row.cost_center,
