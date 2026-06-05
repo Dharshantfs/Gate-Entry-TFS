@@ -528,7 +528,7 @@ class GatePass(Document):
 				{
 					"item_code": row.item_code,
 					"item_name": row.item_name or "",
-					"batch_no": getattr(row, "batch_no", None),
+					"batch_no": get_stock_entry_row_batch_no(row),
 					"description": row.description or "",
 					"uom": row.uom or row.stock_uom,
 					"stock_uom": row.stock_uom,
@@ -756,6 +756,10 @@ class GatePass(Document):
 		self.e_waybill_number = None
 
 	def enforce_outbound_compliance(self, reference_doc):
+		# Internal Stock Entry transfers do not require e-invoice / e-waybill.
+		if self.document_reference == "Stock Entry":
+			return
+
 		# Only enforce compliance if GST Settings doctype is available
 		if not frappe.db.exists("DocType", "GST Settings"):
 			return
@@ -1420,6 +1424,26 @@ class GatePass(Document):
 		frappe.throw(message, title=_("Cannot Amend Gate Pass"))
 
 
+def get_stock_entry_row_batch_no(row) -> str | None:
+	"""Resolve batch/roll number from a Stock Entry Detail row."""
+	if getattr(row, "batch_no", None):
+		return row.batch_no
+
+	bundle = getattr(row, "serial_and_batch_bundle", None)
+	if not bundle and hasattr(row, "get"):
+		bundle = row.get("serial_and_batch_bundle")
+
+	if bundle:
+		return frappe.db.get_value(
+			"Serial and Batch Entry",
+			{"parent": bundle, "batch_no": ["is", "set"]},
+			"batch_no",
+			order_by="idx asc",
+		)
+
+	return None
+
+
 @frappe.whitelist()
 def get_stock_entry_batches(stock_entry_name, item_code):
 	"""
@@ -1700,7 +1724,7 @@ def get_stock_entry_items_for_reference(stock_entry_name):
 		item = {
 			"item_code": row.item_code,
 			"item_name": row.item_name or "",
-			"batch_no": getattr(row, "batch_no", None),
+			"batch_no": get_stock_entry_row_batch_no(row),
 			"description": row.description or "",
 			"uom": row.uom or row.stock_uom,
 			"stock_uom": row.stock_uom,

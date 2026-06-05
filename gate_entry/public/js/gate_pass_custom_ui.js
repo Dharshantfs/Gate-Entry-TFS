@@ -326,6 +326,11 @@ class GatePassCustomUI {
 
 	
 	get_ui_items() {
+		// Stock Entry rows are per roll/batch — never merge by item_code.
+		if (this.isStockEntry()) {
+			return this.items;
+		}
+
 		let grouped = {};
 		this.items.forEach((item, index) => {
 			if (!grouped[item.item_code]) {

@@ -425,38 +425,30 @@ function auto_set_intercompany_warehouses(frm) {
 	const company = frm.doc.company;
 	if (!company) return;
 
-	// Check if the selected company has a mapped destination warehouse
-	const dest_warehouse = INTERCOMPANY_WAREHOUSE_MAP[company];
-	if (!dest_warehouse) return;
-
-	// Update warehouse for every row in the child table
+	// Leave warehouse blank on the form for inter-company Gate In.
+	// Setting a mapped name here can fail Link validation on save; Python
+	// resolves the exact warehouse name on submit.
 	const table = frm.doc.gate_pass_table || [];
-	if (!table.length) {
-		return;
-	}
-
 	table.forEach((row) => {
-		row.warehouse = dest_warehouse;
+		row.warehouse = "";
 	});
 
-	// Sync warehouse into the custom UI without clearing loaded items.
 	if (frm.gate_pass_ui) {
 		frm.gate_pass_ui.load_items_from_table();
 		(frm.gate_pass_ui.items || []).forEach((item) => {
-			item.warehouse = dest_warehouse;
+			item.warehouse = "";
 		});
 		if (frm.gate_pass_ui.items.length) {
 			frm.gate_pass_ui.sync_to_child_table();
 		}
 		frm.gate_pass_ui.render();
-	} else {
+	} else if (table.length) {
 		frm.refresh_field("gate_pass_table");
 	}
 
 	frappe.show_alert({
 		message: __(
-			"Warehouse auto-set to {0} for all items",
-			[dest_warehouse]
+			"Destination warehouse will be set automatically on submit."
 		),
 		indicator: "blue",
 	});
