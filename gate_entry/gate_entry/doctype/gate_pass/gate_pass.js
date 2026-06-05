@@ -404,8 +404,13 @@ function is_intercompany_material_transfer_gate_in(frm) {
 	return (
 		frm.doc.entry_type === "Gate In" &&
 		frm.doc.document_reference === STOCK_ENTRY_REFERENCE &&
-		frm._referenced_stock_entry_type === MATERIAL_TRANSFER_STOCK_ENTRY_TYPE &&
-		!!INTERCOMPANY_WAREHOUSE_MAP[frm.doc.company]
+		!!INTERCOMPANY_WAREHOUSE_MAP[frm.doc.company] &&
+		// When QR scanning or reference loading is happening quickly,
+		// the async stock_entry_type cache might not be populated yet.
+		// In that case, allow the prefill to proceed and the server quantities
+		// are still based on Stock Entry items.
+		(!frm._referenced_stock_entry_type ||
+			frm._referenced_stock_entry_type === MATERIAL_TRANSFER_STOCK_ENTRY_TYPE)
 	);
 }
 
