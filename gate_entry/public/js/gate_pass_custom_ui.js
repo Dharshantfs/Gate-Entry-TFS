@@ -326,11 +326,6 @@ class GatePassCustomUI {
 
 	
 	get_ui_items() {
-		// Stock Entry rows are per roll/batch — never merge by item_code.
-		if (this.isStockEntry()) {
-			return this.items;
-		}
-
 		let grouped = {};
 		this.items.forEach((item, index) => {
 			if (!grouped[item.item_code]) {
@@ -341,17 +336,63 @@ class GatePassCustomUI {
 					dispatched_qty: 0,
 					pending_qty: 0,
 					amount: 0,
-					backend_indices: []
+					backend_indices: [],
+					roll_batches: [],
 				};
 			}
-			grouped[item.item_code].ordered_qty += parseFloat(item.ordered_qty || 0);
-			grouped[item.item_code].received_qty += parseFloat(item.received_qty || 0);
-			grouped[item.item_code].dispatched_qty += parseFloat(item.dispatched_qty || 0);
-			grouped[item.item_code].pending_qty += parseFloat(item.pending_qty || 0);
-			grouped[item.item_code].amount += parseFloat(item.amount || 0);
-			grouped[item.item_code].backend_indices.push(index);
+			const group = grouped[item.item_code];
+			group.ordered_qty += parseFloat(item.ordered_qty || 0);
+			group.received_qty += parseFloat(item.received_qty || 0);
+			group.dispatched_qty += parseFloat(item.dispatched_qty || 0);
+			group.pending_qty += parseFloat(item.pending_qty || 0);
+			group.amount += parseFloat(item.amount || 0);
+			group.backend_indices.push(index);
+
+			if (item.batch_no) {
+				group.roll_batches.push({
+					batch_no: item.batch_no,
+					ordered_qty: parseFloat(item.ordered_qty || 0),
+					received_qty: parseFloat(item.received_qty || 0),
+					dispatched_qty: parseFloat(item.dispatched_qty || 0),
+					uom: item.uom || item.stock_uom || "",
+					order_item_name: item.order_item_name || "",
+				});
+			}
 		});
-		return Object.values(grouped);
+
+		return Object.values(grouped).map((group) => {
+			if (group.roll_batches.length === 1) {
+				group.batch_no = group.roll_batches[0].batch_no;
+			} else if (group.roll_batches.length > 1) {
+				group.batch_no = "";
+			}
+			return group;
+		});
+	}
+
+	get_grouped_item(ui_index) {
+		const ui_items = this.get_ui_items();
+		return ui_items[ui_index] || null;
+	}
+
+	render_batch_display(item, ui_index) {
+		if (!this.isStockEntry() || !item.roll_batches || !item.roll_batches.length) {
+			if (!item.batch_no) {
+				return "";
+			}
+			return `<span class="badge badge-warning" style="font-size:9px;margin-left:4px;" title="Batch: ${frappe.utils.escape_html(item.batch_no)}">🏷 ${frappe.utils.escape_html(item.batch_no)}</span>`;
+		}
+
+		if (item.roll_batches.length === 1) {
+			const batch = item.roll_batches[0].batch_no;
+			return `<span class="badge badge-warning" style="font-size:9px;margin-left:4px;" title="Batch: ${frappe.utils.escape_html(batch)}">🏷 ${frappe.utils.escape_html(batch)}</span>`;
+		}
+
+		return `
+			<button type="button" class="btn btn-xs btn-default batches-btn" data-index="${ui_index}" title="${__("View all rolls / batches")}">
+				<i class="fa fa-tags"></i> ${item.roll_batches.length} ${__("Rolls")}
+			</button>
+		`;
 	}
 
 	render_editable_items() {
@@ -405,9 +446,7 @@ class GatePassCustomUI {
 		const inputDisabled = this.frm.doc.docstatus === 1;
 		const allowRemove = this.isGateIn();
 
-		const batch_badge = item.batch_no
-			? `<span class="badge badge-warning" style="font-size:9px;margin-left:4px;" title="Batch: ${frappe.utils.escape_html(item.batch_no)}">🏷 ${frappe.utils.escape_html(item.batch_no)}</span>`
-			: "";
+		const batch_display = this.render_batch_display(item, index);
 
 		return `
 			<div class="item-row ${status_class}" data-index="${index}">
@@ -418,7 +457,7 @@ class GatePassCustomUI {
 							? '<span class="badge badge-info" style="font-size: 9px; margin-left: 4px;">RC</span>'
 							: ""
 					}
-					${batch_badge}
+					${batch_display}
 				</div>
 				<div class="item-col item-name-col">
 					<span class="item-name">${frappe.utils.escape_html(item.item_name)}</span>
@@ -461,6 +500,14 @@ class GatePassCustomUI {
 			.on("click", function () {
 				const index = $(this).data("index");
 				self.show_item_details(index);
+			});
+
+		this.wrapper
+			.find(".batches-btn")
+			.off("click")
+			.on("click", function () {
+				const index = $(this).data("index");
+				self.show_roll_batches(index);
 			});
 
 		if (!this.shouldAllowQuantityEdit()) {
@@ -666,15 +713,21 @@ class GatePassCustomUI {
 	/**
 	 * Remove an item from the list
 	 */
-	remove_item(index) {
+	remove_item(ui_index) {
 		if (!this.isGateIn()) {
 			return;
 		}
 
-		const item = this.items[index];
+		const grouped = this.get_grouped_item(ui_index);
+		if (!grouped) {
+			return;
+		}
 
-		frappe.confirm(__("Are you sure you want to remove {0}?", [item.item_code]), () => {
-			this.items.splice(index, 1);
+		frappe.confirm(__("Are you sure you want to remove {0}?", [grouped.item_code]), () => {
+			const indices = [...(grouped.backend_indices || [])].sort((a, b) => b - a);
+			indices.forEach((backend_index) => {
+				this.items.splice(backend_index, 1);
+			});
 			this.sync_to_child_table();
 			this.render();
 			frappe.show_alert({
@@ -684,12 +737,46 @@ class GatePassCustomUI {
 		});
 	}
 
-	updateQuantity(index, value) {
+	distribute_grouped_quantity(grouped, value) {
+		const quantityField = this.getQuantityField();
+		const backend_indices = grouped.backend_indices || [];
+		if (!backend_indices.length) {
+			return;
+		}
+
+		const total_ordered = backend_indices.reduce(
+			(sum, backend_index) => sum + parseFloat(this.items[backend_index].ordered_qty || 0),
+			0
+		);
+
+		let remaining = value;
+		backend_indices.forEach((backend_index, idx) => {
+			const row = this.items[backend_index];
+			let row_qty;
+
+			if (idx === backend_indices.length - 1) {
+				row_qty = remaining;
+			} else if (total_ordered > 0) {
+				row_qty = (value * parseFloat(row.ordered_qty || 0)) / total_ordered;
+				remaining -= row_qty;
+			} else {
+				row_qty = value / backend_indices.length;
+				remaining -= row_qty;
+			}
+
+			row[quantityField] = row_qty;
+			row.pending_qty = Math.max(parseFloat(row.ordered_qty || 0) - row_qty, 0);
+			row.amount = row_qty * (parseFloat(row.rate) || 0);
+		});
+	}
+
+	updateQuantity(ui_index, value) {
 		if (!this.shouldAllowQuantityEdit()) {
 			return;
 		}
 
-		if (index < 0 || index >= this.items.length) {
+		const grouped = this.get_grouped_item(ui_index);
+		if (!grouped) {
 			return;
 		}
 
@@ -705,18 +792,17 @@ class GatePassCustomUI {
 			return;
 		}
 
-		const item = this.items[index];
-		const orderedQty = parseFloat(item.ordered_qty || 0);
-		const isRateContract = item.is_rate_contract || 0;
+		const orderedQty = parseFloat(grouped.ordered_qty || 0);
+		const isRateContract = grouped.is_rate_contract || 0;
 
 		if (this.isGateIn()) {
-			const pendingQty = parseFloat(item.pending_qty || Math.max(orderedQty - value, 0));
+			const pendingQty = parseFloat(grouped.pending_qty || Math.max(orderedQty - value, 0));
 			if (!isRateContract && value > pendingQty && pendingQty > 0) {
 				frappe.msgprint({
 					title: __("Over Receipt Warning"),
 					message: __("You are receiving more than the pending quantity ({0} {1})", [
 						pendingQty,
-						item.uom,
+						grouped.uom,
 					]),
 					indicator: "orange",
 				});
@@ -731,22 +817,23 @@ class GatePassCustomUI {
 			});
 		}
 
-		item[quantityField] = value;
-		item.pending_qty = Math.max(orderedQty - value, 0);
-		item.amount = value * (parseFloat(item.rate) || 0);
-
+		this.distribute_grouped_quantity(grouped, value);
 		this.sync_to_child_table();
 		this.render();
 	}
 
-	validateQuantityInput(index, value, input_element) {
+	validateQuantityInput(ui_index, value, input_element) {
 		if (!this.shouldAllowQuantityEdit()) {
 			return;
 		}
 
-		const item = this.items[index];
-		const orderedQty = parseFloat(item.ordered_qty || 0);
-		const isRateContract = item.is_rate_contract || 0;
+		const grouped = this.get_grouped_item(ui_index);
+		if (!grouped) {
+			return;
+		}
+
+		const orderedQty = parseFloat(grouped.ordered_qty || 0);
+		const isRateContract = grouped.is_rate_contract || 0;
 
 		input_element.removeClass("text-danger text-warning");
 
@@ -765,11 +852,62 @@ class GatePassCustomUI {
 		}
 	}
 
+	show_roll_batches(ui_index) {
+		const grouped = this.get_grouped_item(ui_index);
+		if (!grouped || !grouped.roll_batches || !grouped.roll_batches.length) {
+			frappe.msgprint(__("No roll / batch details available for this item."));
+			return;
+		}
+
+		const quantityField = this.getQuantityField();
+		const quantityLabel = this.getQuantityLabel();
+		const rows_html = grouped.roll_batches
+			.map((roll) => {
+				const qty = roll[quantityField] ?? roll.ordered_qty ?? 0;
+				return `
+					<tr>
+						<td>${frappe.utils.escape_html(roll.batch_no || "—")}</td>
+						<td class="text-right">${this.formatQuantity(roll.ordered_qty)}</td>
+						<td class="text-right">${this.formatQuantity(qty)}</td>
+						<td>${frappe.utils.escape_html(roll.uom || "")}</td>
+					</tr>
+				`;
+			})
+			.join("");
+
+		const dialog = new frappe.ui.Dialog({
+			title: __("Rolls / Batches for {0}", [grouped.item_code]),
+			fields: [
+				{
+					fieldtype: "HTML",
+					fieldname: "rolls_html",
+					options: `
+						<div class="table-responsive">
+							<table class="table table-bordered table-sm">
+								<thead>
+									<tr>
+										<th>${__("Batch / Roll No")}</th>
+										<th class="text-right">${__("Ordered Qty")}</th>
+										<th class="text-right">${frappe.utils.escape_html(quantityLabel)}</th>
+										<th>${__("UOM")}</th>
+									</tr>
+								</thead>
+								<tbody>${rows_html}</tbody>
+							</table>
+						</div>
+					`,
+				},
+			],
+		});
+
+		dialog.show();
+	}
+
 	/**
 	 * Show item details in a dialog
 	 */
-	show_item_details(index) {
-		const item = this.items[index];
+	show_item_details(ui_index) {
+		const item = this.get_grouped_item(ui_index) || this.items[ui_index];
 		const is_rate_contract = item.is_rate_contract || 0;
 		const is_outbound = this.isOutbound();
 		let fields = [
@@ -938,6 +1076,7 @@ class GatePassCustomUI {
 								<div class="item-row outbound-row" ${tooltip}>
 					<div class="item-col item-code-col">
 						<span class="item-code">${frappe.utils.escape_html(item.item_code || "")}</span>
+						${this.render_batch_display(item, idx)}
 					</div>
 					<div class="item-col item-name-col outbound-name">
 						<span class="item-name">${frappe.utils.escape_html(item.item_name || item.item_code || "")}</span>
