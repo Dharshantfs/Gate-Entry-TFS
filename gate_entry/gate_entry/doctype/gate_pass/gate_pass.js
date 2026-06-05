@@ -272,11 +272,10 @@ frappe.ui.form.on("Gate Pass", {
 		} else {
 			frm._referenced_stock_entry_type = null;
 			clear_compliance_status(frm);
-		}
-
-		// Refresh custom UI to show/hide Add Item button
-		if (frm.gate_pass_ui) {
-			frm.gate_pass_ui.refresh();
+			// Only refresh when reference is cleared; avoid wiping items mid-load.
+			if (frm.gate_pass_ui) {
+				frm.gate_pass_ui.render();
+			}
 		}
 	},
 
@@ -433,28 +432,25 @@ function auto_set_intercompany_warehouses(frm) {
 	// Update warehouse for every row in the child table
 	const table = frm.doc.gate_pass_table || [];
 	if (!table.length) {
-		if (frm.gate_pass_ui) {
-			// Items may be in the custom UI only – update them there too
-			(frm.gate_pass_ui.items || []).forEach((item) => {
-				item.warehouse = dest_warehouse;
-			});
-			frm.gate_pass_ui.sync_to_child_table();
-			frm.gate_pass_ui.render();
-		}
 		return;
 	}
 
 	table.forEach((row) => {
-		frappe.model.set_value(row.doctype, row.name, "warehouse", dest_warehouse);
+		row.warehouse = dest_warehouse;
 	});
 
-	// Sync warehouse into the custom UI items array as well
+	// Sync warehouse into the custom UI without clearing loaded items.
 	if (frm.gate_pass_ui) {
+		frm.gate_pass_ui.load_items_from_table();
 		(frm.gate_pass_ui.items || []).forEach((item) => {
 			item.warehouse = dest_warehouse;
 		});
-		frm.gate_pass_ui.sync_to_child_table();
+		if (frm.gate_pass_ui.items.length) {
+			frm.gate_pass_ui.sync_to_child_table();
+		}
 		frm.gate_pass_ui.render();
+	} else {
+		frm.refresh_field("gate_pass_table");
 	}
 
 	frappe.show_alert({
@@ -802,7 +798,9 @@ function set_gate_pass_items(frm, items) {
 	frm.refresh_field("gate_pass_table");
 
 	if (frm.gate_pass_ui) {
-		frm.gate_pass_ui.refresh();
+		// Render immediately; refresh() is delayed and races with auto_set.
+		frm.gate_pass_ui.load_items_from_table();
+		frm.gate_pass_ui.render();
 	}
 
 	if (is_intercompany_gate_in) {
@@ -997,18 +995,19 @@ function process_qr_scan(frm, qr_text) {
 	let doctype = data["doctype"];
 	if (!doctype) return frappe.msgprint(__("Invalid QR: DocType not found."));
 
-	// Set document_reference first so the trigger runs, then set reference_number
-	frm.set_value("document_reference", doctype).then(() => {
-		if (data["party"]) {
-			frm.set_value("company", data["party"]);
-		}
-		
-		frm.set_value("entry_type", "Gate In");
-		
-		if (data["challan no"]) {
-			frm.set_value("reference_number", data["challan no"]);
-		}
-		
-		frappe.show_alert({message: __('QR Code applied successfully'), indicator: 'green'});
-	});
+	// Chain field updates so company/entry_type are set before reference_number loads items.
+	frm.set_value("document_reference", doctype)
+		.then(() => frm.set_value("company", data["party"] || frm.doc.company))
+		.then(() => frm.set_value("entry_type", "Gate In"))
+		.then(() => {
+			if (data["challan no"]) {
+				return frm.set_value("reference_number", data["challan no"]);
+			}
+		})
+		.then(() => {
+			frappe.show_alert({
+				message: __("QR Code applied successfully"),
+				indicator: "green",
+			});
+		});
 }
