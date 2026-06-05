@@ -19,6 +19,49 @@ from gate_entry.stock_integration import utils as stock_utils
 
 logger = frappe.logger("Gate Pass")
 
+# ------------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------------
+def _normalize_warehouse_name(name: str) -> str:
+	"""Normalize a warehouse name for fuzzy comparisons (spaces/dashes)."""
+	if not name:
+		return ""
+	# Collapse whitespace and normalize common dash variants
+	normalized = " ".join(cstr(name).replace("–", "-").replace("—", "-").split())
+	# Normalize spaces around hyphen for patterns like "ABC  -  XYZ"
+	normalized = normalized.replace(" - ", " - ")
+	return normalized.strip()
+
+
+def _resolve_company_warehouse_name(company: str, desired_name: str) -> str | None:
+	"""
+	Try to resolve the exact Warehouse `name` within a company, even if the
+	input has extra spaces / different dash characters.
+	"""
+	if not company or not desired_name:
+		return None
+
+	# Exact match first
+	if frappe.db.exists("Warehouse", desired_name):
+		return desired_name
+
+	desired_norm = _normalize_warehouse_name(desired_name)
+	if not desired_norm:
+		return None
+
+	# Search warehouses for this company and compare normalized forms
+	available = frappe.get_all(
+		"Warehouse",
+		filters={"company": company, "is_group": 0},
+		pluck="name",
+		limit=500,
+	)
+	for wh in available:
+		if _normalize_warehouse_name(wh) == desired_norm:
+			return wh
+
+	return None
+
 # Re-export for backwards compatibility; canonical map is in gate_entry.constants.
 INTERCOMPANY_DEST_WAREHOUSE_MAP = INTERCOMPANY_MATERIAL_TRANSFER_DEST_WAREHOUSE_MAP
 
@@ -993,6 +1036,11 @@ class GatePass(Document):
 						"INTERCOMPANY_MATERIAL_TRANSFER_DEST_WAREHOUSE_MAP in gate_entry/constants.py."
 					).format(dst_company)
 				)
+
+			# Resolve exact warehouse name for this company (tolerate spacing/dash differences)
+			resolved = _resolve_company_warehouse_name(dst_company, dest_wh)
+			if resolved:
+				dest_wh = resolved
 
 			# Validate the warehouse actually exists in the system
 			if not frappe.db.exists("Warehouse", dest_wh):
