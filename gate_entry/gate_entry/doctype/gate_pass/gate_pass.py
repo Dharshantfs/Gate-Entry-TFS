@@ -128,6 +128,19 @@ def _is_job_work_receiver_entry(
 	return _is_job_work_company_pair(gp, ste) or _is_job_work_company_pair(gp, receiver)
 
 
+def get_stock_entry_quantity_field(
+	entry_type: str | None,
+	*,
+	job_work_receive: bool = False,
+) -> str:
+	"""Return gate_pass_table qty column used for this Stock Entry entry type."""
+	if _is_inbound_stock_entry_entry_type(entry_type):
+		return "received_qty"
+	if _normalize_entry_type(entry_type) == "Job Work Out" and job_work_receive:
+		return "received_qty"
+	return "dispatched_qty"
+
+
 def resolve_job_work_in_dest_warehouse(gp_company: str | None, ste_sender_company: str | None) -> str | None:
 	"""Resolve job-work inbound warehouse from (GP company, STE sender company)."""
 	gp_company = _normalize_entry_type(gp_company)
@@ -167,6 +180,12 @@ class GatePass(Document):
 			self.company,
 			stock_entry.company,
 			_stock_entry_receiver_company(stock_entry),
+		)
+
+	def get_stock_entry_quantity_field(self, entry_type=None) -> str:
+		return get_stock_entry_quantity_field(
+			entry_type or self.entry_type,
+			job_work_receive=self._is_job_work_receiver_gate_pass(),
 		)
 
 	def get_stock_entry_context(self):
@@ -689,7 +708,7 @@ class GatePass(Document):
 			self.populate_gate_pass_items(reference_items)
 			return
 
-		quantity_field = "received_qty" if preserve_quantities else "dispatched_qty"
+		quantity_field = "received_qty" if preserve_quantities else self.get_stock_entry_quantity_field()
 
 		for key, item in reference_map.items():
 			row = existing_map[key]
@@ -737,7 +756,7 @@ class GatePass(Document):
 			return
 
 		existing = self.get_existing_stock_entry_allocations(stock_entry.name, entry_type)
-		quantity_field = "dispatched_qty" if _is_outbound_stock_entry_entry_type(entry_type) else "received_qty"
+		quantity_field = self.get_stock_entry_quantity_field(entry_type)
 
 		for item in self.gate_pass_table:
 			order_item = item.order_item_name
@@ -771,7 +790,7 @@ class GatePass(Document):
 		wait for each other and preventing over-allocation when multiple gate passes are
 		validated simultaneously for the same stock entry.
 		"""
-		column = "dispatched_qty" if entry_type == "Gate Out" else "received_qty"
+		column = self.get_stock_entry_quantity_field(entry_type)
 
 		# Use frappe.qb with for_update() to lock rows and prevent race conditions
 		gate_pass = DocType("Gate Pass")

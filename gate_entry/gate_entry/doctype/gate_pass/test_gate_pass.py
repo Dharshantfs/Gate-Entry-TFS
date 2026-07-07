@@ -629,6 +629,7 @@ class TestGatePass(FrappeTestCase):
 		from gate_entry.gate_entry.doctype.gate_pass.gate_pass import (
 			_is_job_work_receiver_entry,
 			_stock_entry_items_qty_for_entry_type,
+			get_stock_entry_quantity_field,
 		)
 
 		self.assertTrue(
@@ -639,6 +640,14 @@ class TestGatePass(FrappeTestCase):
 				"Jayashree Spun Bond - 1ZT",
 			)
 		)
+		self.assertEqual(
+			get_stock_entry_quantity_field("Job Work Out", job_work_receive=True),
+			"received_qty",
+		)
+		self.assertEqual(
+			get_stock_entry_quantity_field("Job Work Out", job_work_receive=False),
+			"dispatched_qty",
+		)
 		received, dispatched = _stock_entry_items_qty_for_entry_type(
 			76.15,
 			"Job Work Out",
@@ -647,6 +656,37 @@ class TestGatePass(FrappeTestCase):
 		)
 		self.assertEqual(received, 76.15)
 		self.assertEqual(dispatched, 0.0)
+
+	def test_validate_job_work_out_receiver_uses_received_qty(self):
+		from gate_entry.gate_entry.doctype.gate_pass.gate_pass import GatePass
+
+		gate_pass = self.create_gate_pass(
+			company="Jayashree Spun Bond - 1ZT",
+			reference_number="MAT-STE-02922",
+			entry_type="Job Work Out",
+		)
+		mock_ste = MockDoc(
+			stock_entry_type="Material Transfer",
+			company="Thusma SMS Nonwovens Private Limited - 1Z0",
+			transfer_to_company="Jayashree Spun Bond - 1ZT",
+			party_type="Company",
+			party="Jayashree Spun Bond - 1ZT",
+			items=[MockDoc(name="ste-item-1", item_code="1001100010401155", transfer_qty=189.66, qty=189.66)],
+		)
+		gate_pass.append(
+			"gate_pass_table",
+			{
+				"item_code": "1001100010401155",
+				"order_item_name": "ste-item-1",
+				"received_qty": 189.66,
+				"dispatched_qty": 0,
+			},
+		)
+		with (
+			patch("frappe.get_cached_doc", return_value=mock_ste),
+			patch.object(GatePass, "get_existing_stock_entry_allocations", return_value={}),
+		):
+			gate_pass.validate_stock_entry_allocations(mock_ste)
 
 	def test_derive_job_work_out_at_sender_jsb_to_thusma(self):
 		gate_pass = self.create_gate_pass(
