@@ -567,3 +567,27 @@ class TestGatePass(FrappeTestCase):
 		self.assertTrue(_is_inbound_stock_entry_entry_type("Gate In"))
 		self.assertTrue(_is_outbound_stock_entry_entry_type("Job Work Out"))
 		self.assertFalse(_is_inbound_stock_entry_entry_type("Job Work Out"))
+
+	def test_get_stock_entry_gate_pass_context(self):
+		from gate_entry.gate_entry.doctype.gate_pass.gate_pass import get_stock_entry_gate_pass_context
+
+		mock_doc = MockDoc(
+			stock_entry_type="Material Transfer",
+			company="Thusma SMS Nonwovens Private Limited - 1Z0",
+			transfer_to_company="Jayashree Spun Bond - 1ZT",
+			custom_transfer_to_company=None,
+			party_type="Company",
+			party="Jayashree Spun Bond - 1ZT",
+		)
+
+		with (
+			patch("frappe.db.exists", return_value=True),
+			patch("frappe.has_permission", return_value=True),
+			patch("frappe.get_doc", return_value=mock_doc),
+		):
+			result = get_stock_entry_gate_pass_context("MAT-STE-02916")
+
+		self.assertEqual(result["stock_entry_type"], "Material Transfer")
+		self.assertEqual(result["company"], "Thusma SMS Nonwovens Private Limited - 1Z0")
+		self.assertEqual(result["receiver_company"], "Jayashree Spun Bond - 1ZT")
+		self.assertEqual(result["party"], "Jayashree Spun Bond - 1ZT")

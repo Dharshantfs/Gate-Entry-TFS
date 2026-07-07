@@ -455,21 +455,24 @@ function cache_referenced_stock_entry_type(frm) {
 		return Promise.resolve();
 	}
 
-	return frappe.db
-		.get_value(
-			"Stock Entry",
-			frm.doc.reference_number,
-			["stock_entry_type", "company", "transfer_to_company", "custom_transfer_to_company", "party_type", "party"]
-		)
+	return frappe
+		.call({
+			method: "gate_entry.gate_entry.doctype.gate_pass.gate_pass.get_stock_entry_gate_pass_context",
+			args: { stock_entry_name: frm.doc.reference_number },
+		})
 		.then((r) => {
-			const row = r?.message || r || {};
+			const row = r?.message || {};
 			frm._referenced_stock_entry_type = row.stock_entry_type || null;
 			frm._referenced_ste_company = row.company || null;
 			frm._referenced_ste_receiver =
-				row.transfer_to_company ||
-				row.custom_transfer_to_company ||
+				row.receiver_company ||
 				(row.party_type === "Company" ? row.party : null) ||
 				null;
+		})
+		.catch(() => {
+			frm._referenced_stock_entry_type = null;
+			frm._referenced_ste_company = null;
+			frm._referenced_ste_receiver = null;
 		});
 }
 

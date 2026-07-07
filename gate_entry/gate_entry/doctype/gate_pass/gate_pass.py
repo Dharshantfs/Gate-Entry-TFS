@@ -1859,6 +1859,27 @@ def extract_transport_details(doc):
 	}
 
 @frappe.whitelist()
+def get_stock_entry_gate_pass_context(stock_entry_name: str | None = None):
+	"""Desk context for Gate Pass job-work / inter-company STE linking (avoids client field-query limits)."""
+	stock_entry_name = cstr(stock_entry_name).strip()
+	if not stock_entry_name:
+		return {}
+	if not frappe.db.exists("Stock Entry", stock_entry_name):
+		return {}
+	if not frappe.has_permission("Stock Entry", "read", stock_entry_name):
+		frappe.throw(_("Not permitted to read Stock Entry {0}").format(stock_entry_name))
+
+	doc = frappe.get_doc("Stock Entry", stock_entry_name)
+	return {
+		"stock_entry_type": doc.stock_entry_type,
+		"company": doc.company,
+		"receiver_company": _stock_entry_receiver_company(doc),
+		"party_type": doc.get("party_type"),
+		"party": doc.get("party"),
+	}
+
+
+@frappe.whitelist()
 def get_origin_vehicle_details(reference_number):
 	"""
 	For an inter-company Gate In against a Stock Entry,
