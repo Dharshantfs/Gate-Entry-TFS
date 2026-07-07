@@ -77,7 +77,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Entry Type",
-   "options": "\nGate In\nGate Out",
+   "options": "\nGate In\nGate Out\nJob Work In\nJob Work Out",
    "reqd": 1
   },
   {

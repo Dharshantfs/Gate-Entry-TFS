@@ -10,10 +10,15 @@ from frappe.utils import cint, cstr, flt, nowdate, nowtime
 
 from gate_entry.constants import (
 	INBOUND_REFERENCES,
+	INBOUND_STOCK_ENTRY_ENTRY_TYPES,
 	INTERCOMPANY_MATERIAL_TRANSFER_DEST_WAREHOUSE_MAP,
+	JOB_WORK_IN_DEST_WAREHOUSE_MAP,
+	JSB_JOB_WORK_COMPANIES,
 	MATERIAL_TRANSFER_STOCK_ENTRY_TYPE,
 	OUTBOUND_REFERENCES,
+	OUTBOUND_STOCK_ENTRY_ENTRY_TYPES,
 	REFERENCE_TOTAL_FIELDS,
+	THUSMA_JOB_WORK_COMPANY,
 )
 from gate_entry.stock_integration import utils as stock_utils
 
@@ -69,15 +74,61 @@ INTERCOMPANY_DEST_WAREHOUSE_MAP = INTERCOMPANY_MATERIAL_TRANSFER_DEST_WAREHOUSE_
 JSB_TRANSIT_WAREHOUSE = "Goods In Transit - JSB-1ZT"
 
 
+def _normalize_entry_type(entry_type: str | None) -> str:
+	return (entry_type or "").strip()
+
+
+def _is_inbound_stock_entry_entry_type(entry_type: str | None) -> bool:
+	return _normalize_entry_type(entry_type) in INBOUND_STOCK_ENTRY_ENTRY_TYPES
+
+
+def _is_outbound_stock_entry_entry_type(entry_type: str | None) -> bool:
+	return _normalize_entry_type(entry_type) in OUTBOUND_STOCK_ENTRY_ENTRY_TYPES
+
+
+def _is_job_work_participant(company: str | None) -> bool:
+	company = _normalize_entry_type(company)
+	return company == THUSMA_JOB_WORK_COMPANY or company in JSB_JOB_WORK_COMPANIES
+
+
+def _is_job_work_company_pair(company_a: str | None, company_b: str | None) -> bool:
+	a = _normalize_entry_type(company_a)
+	b = _normalize_entry_type(company_b)
+	if not a or not b or a == b:
+		return False
+	return _is_job_work_participant(a) and _is_job_work_participant(b)
+
+
+def _stock_entry_receiver_company(stock_entry) -> str | None:
+	for fn in ("transfer_to_company", "custom_transfer_to_company"):
+		val = cstr(getattr(stock_entry, fn, None) or "").strip()
+		if val:
+			return val
+	if cstr(getattr(stock_entry, "party_type", None) or "").strip() == "Company":
+		party = cstr(getattr(stock_entry, "party", None) or "").strip()
+		if party:
+			return party
+	return None
+
+
+def resolve_job_work_in_dest_warehouse(gp_company: str | None, ste_sender_company: str | None) -> str | None:
+	"""Resolve job-work inbound warehouse from (GP company, STE sender company)."""
+	gp_company = _normalize_entry_type(gp_company)
+	ste_sender_company = _normalize_entry_type(ste_sender_company)
+	if not gp_company or not ste_sender_company:
+		return None
+	return JOB_WORK_IN_DEST_WAREHOUSE_MAP.get((gp_company, ste_sender_company))
+
+
 class GatePass(Document):
 	def is_outbound_reference(self):
 		if self.document_reference == "Stock Entry":
-			return (self.entry_type or "").lower() != "gate in"
+			return _is_outbound_stock_entry_entry_type(self.entry_type)
 		return self.document_reference in OUTBOUND_REFERENCES
 
 	def is_inbound_reference(self):
 		if self.document_reference == "Stock Entry":
-			return (self.entry_type or "").lower() == "gate in"
+			return _is_inbound_stock_entry_entry_type(self.entry_type)
 		return self.document_reference in INBOUND_REFERENCES
 
 	def get_stock_entry_context(self):
@@ -107,7 +158,7 @@ class GatePass(Document):
 			outbound_reference = self.outbound_material_transfer or stock_entry.name
 
 		base_for_items = stock_entry
-		if entry_type == "gate in" and outbound_reference:
+		if _is_inbound_stock_entry_entry_type(self.entry_type) and outbound_reference:
 			try:
 				base_for_items = frappe.get_cached_doc("Stock Entry", outbound_reference)
 			except frappe.DoesNotExistError:
@@ -180,6 +231,11 @@ class GatePass(Document):
 		if not self.reference_number:
 			return self.entry_type or "Gate Out"
 
+		current = _normalize_entry_type(self.entry_type)
+		if current in INBOUND_STOCK_ENTRY_ENTRY_TYPES | OUTBOUND_STOCK_ENTRY_ENTRY_TYPES:
+			if current.startswith("Job Work"):
+				return current
+
 		try:
 			stock_entry = frappe.get_cached_doc("Stock Entry", self.reference_number)
 		except frappe.DoesNotExistError:
@@ -191,10 +247,17 @@ class GatePass(Document):
 		if stock_utils.is_material_transfer(stock_entry):
 			if stock_utils.is_return_entry(stock_entry):
 				return "Gate In"
-			# Inter-company transfer: if this Gate Pass belongs to the RECEIVING company
-			# (different from the stock entry's company), it must be a Gate In.
-			if self.company and stock_entry.company and self.company != stock_entry.company:
+			gp_company = _normalize_entry_type(self.company)
+			ste_company = _normalize_entry_type(stock_entry.company)
+			if gp_company and ste_company and gp_company != ste_company:
+				if _is_job_work_company_pair(gp_company, ste_company):
+					return "Job Work In"
 				return "Gate In"
+			receiver = _stock_entry_receiver_company(stock_entry)
+			if gp_company and ste_company and gp_company == ste_company and _is_job_work_company_pair(
+				gp_company, receiver
+			):
+				return "Job Work Out"
 			return "Gate Out"
 
 		if stock_utils.is_send_to_subcontractor(stock_entry):
@@ -466,7 +529,7 @@ class GatePass(Document):
 
 		if self.document_reference == "Stock Entry" and reference_doc:
 			allocation_doc = reference_doc
-			if self.entry_type == "Gate In" and self.outbound_material_transfer:
+			if self.is_inbound_reference() and self.outbound_material_transfer:
 				allocation_doc = context.base_for_items
 
 			self.validate_stock_entry_allocations(allocation_doc, context)
@@ -508,7 +571,10 @@ class GatePass(Document):
 			ordered = flt(item.get("ordered_qty") or 0)
 			item["pending_qty"] = max(ordered - allocated, 0)
 
-		self.align_gate_pass_items(reference_items, preserve_quantities=entry_type == "Gate In")
+		self.align_gate_pass_items(
+			reference_items,
+			preserve_quantities=_is_inbound_stock_entry_entry_type(entry_type),
+		)
 		self.recalculate_item_amounts()
 
 		return stock_entry, reference_items
@@ -634,7 +700,7 @@ class GatePass(Document):
 			return
 
 		existing = self.get_existing_stock_entry_allocations(stock_entry.name, entry_type)
-		quantity_field = "dispatched_qty" if entry_type == "Gate Out" else "received_qty"
+		quantity_field = "dispatched_qty" if _is_outbound_stock_entry_entry_type(entry_type) else "received_qty"
 
 		for item in self.gate_pass_table:
 			order_item = item.order_item_name
@@ -646,7 +712,9 @@ class GatePass(Document):
 				continue
 
 			current = flt(item.get(quantity_field) or 0)
-			if current <= 0 and not (entry_type == "Gate In" and cint(self.manual_return_flow)):
+			if current <= 0 and not (
+				_is_inbound_stock_entry_entry_type(entry_type) and cint(self.manual_return_flow)
+			):
 				frappe.throw(_("Quantity for item {0} must be greater than zero.").format(item.item_code))
 
 			allocated = flt(existing.get(order_item, 0))
@@ -1009,6 +1077,17 @@ class GatePass(Document):
 				wh_company = frappe.db.get_value("Warehouse", dest_wh, "company")
 				if wh_company != dst_company:
 					dest_wh = None
+
+			# Job Work In: warehouse from (receiving company, STE sender company).
+			if _normalize_entry_type(self.entry_type) == "Job Work In":
+				dest_wh = resolve_job_work_in_dest_warehouse(dst_company, src_company)
+				if not dest_wh:
+					frappe.throw(
+						_(
+							"No job-work inbound warehouse configured for receiving company {0} "
+							"with sender {1}. Update JOB_WORK_IN_DEST_WAREHOUSE_MAP in gate_entry/constants.py."
+						).format(dst_company, src_company)
+					)
 
 			# Material Transfer Gate In: use configured destination warehouse first
 			# (e.g. Raw Materials for VTP — avoid picking the wrong Finished Goods warehouse).
@@ -1497,7 +1576,7 @@ def get_stock_entry_batches(stock_entry_name, item_code):
 
 
 @frappe.whitelist()
-def get_items(document_reference, reference_number):
+def get_items(document_reference, reference_number, entry_type=None):
 	"""
 	Fetch items from the reference document with pending quantities
 
@@ -1528,7 +1607,18 @@ def get_items(document_reference, reference_number):
 	except KeyError:
 		frappe.throw(_("Unsupported Document Reference: {0}").format(document_reference))
 
+	if document_reference == "Stock Entry":
+		return fetcher(reference_number, entry_type=entry_type)
 	return fetcher(reference_number)
+
+
+def _stock_entry_items_qty_for_entry_type(transfer_qty: float, entry_type: str | None, is_return: bool) -> tuple[float, float]:
+	"""Return (received_qty, dispatched_qty) for desk/API item rows."""
+	if is_return:
+		return flt(transfer_qty), 0.0
+	if _is_inbound_stock_entry_entry_type(entry_type):
+		return flt(transfer_qty), 0.0
+	return 0.0, flt(transfer_qty)
 
 
 def get_purchase_order_items(purchase_order):
@@ -1709,7 +1799,7 @@ def get_delivery_note_items(delivery_note):
 	return items
 
 
-def get_stock_entry_items_for_reference(stock_entry_name):
+def get_stock_entry_items_for_reference(stock_entry_name, entry_type=None):
 	stock_entry = frappe.get_doc("Stock Entry", stock_entry_name)
 	is_return = cint(getattr(stock_entry, "is_return", 0))
 
@@ -1718,8 +1808,9 @@ def get_stock_entry_items_for_reference(stock_entry_name):
 		transfer_qty = abs(flt(getattr(row, "transfer_qty", row.qty)))
 		logger.info(f"Stock Entry Item: {row.as_dict()}")
 
-		received_qty = transfer_qty if is_return else 0
-		dispatched_qty = 0 if is_return else transfer_qty
+		received_qty, dispatched_qty = _stock_entry_items_qty_for_entry_type(
+			transfer_qty, entry_type, is_return
+		)
 
 		item = {
 			"item_code": row.item_code,

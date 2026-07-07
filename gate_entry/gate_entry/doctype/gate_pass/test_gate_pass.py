@@ -531,3 +531,39 @@ class TestGatePass(FrappeTestCase):
 			fields_cleared = {call[0][2] for call in calls_with_none}
 			self.assertIn("outbound_material_transfer", fields_cleared)
 			self.assertIn("reference_number", fields_cleared)
+
+	def test_job_work_in_warehouse_map_thusma_receives_from_jsb_1zt(self):
+		from gate_entry.gate_entry.doctype.gate_pass.gate_pass import resolve_job_work_in_dest_warehouse
+
+		wh = resolve_job_work_in_dest_warehouse(
+			"Thusma SMS Nonwovens Private Limited - 1Z0",
+			"Jayashree Spun Bond - 1ZT",
+		)
+		self.assertEqual(wh, "Jayashree 1ZT - JWO RM - TSNPL")
+
+	def test_job_work_in_warehouse_map_jsb_1zt_receives_fg_from_thusma(self):
+		from gate_entry.gate_entry.doctype.gate_pass.gate_pass import resolve_job_work_in_dest_warehouse
+
+		wh = resolve_job_work_in_dest_warehouse(
+			"Jayashree Spun Bond - 1ZT",
+			"Thusma SMS Nonwovens Private Limited - 1Z0",
+		)
+		self.assertEqual(wh, "Thusma 1Z0 - JWI FG - JSB-1ZT")
+
+	def test_stock_entry_items_qty_for_job_work_in(self):
+		from gate_entry.gate_entry.doctype.gate_pass.gate_pass import _stock_entry_items_qty_for_entry_type
+
+		received, dispatched = _stock_entry_items_qty_for_entry_type(76.15, "Job Work In", False)
+		self.assertEqual(received, 76.15)
+		self.assertEqual(dispatched, 0.0)
+
+	def test_inbound_entry_type_helpers(self):
+		from gate_entry.gate_entry.doctype.gate_pass.gate_pass import (
+			_is_inbound_stock_entry_entry_type,
+			_is_outbound_stock_entry_entry_type,
+		)
+
+		self.assertTrue(_is_inbound_stock_entry_entry_type("Job Work In"))
+		self.assertTrue(_is_inbound_stock_entry_entry_type("Gate In"))
+		self.assertTrue(_is_outbound_stock_entry_entry_type("Job Work Out"))
+		self.assertFalse(_is_inbound_stock_entry_entry_type("Job Work Out"))

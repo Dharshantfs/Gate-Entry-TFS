@@ -31,11 +31,13 @@ class GatePassCustomUI {
 	}
 
 	isGateOut() {
-		return (this.frm?.doc?.entry_type || "Gate Out") === "Gate Out";
+		const et = (this.frm?.doc?.entry_type || "Gate Out").trim();
+		return et === "Gate Out" || et === "Job Work Out";
 	}
 
 	isGateIn() {
-		return (this.frm?.doc?.entry_type || "Gate Out") === "Gate In";
+		const et = (this.frm?.doc?.entry_type || "Gate Out").trim();
+		return et === "Gate In" || et === "Job Work In";
 	}
 
 	isStockEntry() {
@@ -1054,7 +1056,8 @@ class GatePassCustomUI {
 	}
 
 	isOutbound() {
-		return (this.frm?.doc?.entry_type || "Gate Out") === "Gate Out";
+		const et = (this.frm?.doc?.entry_type || "Gate Out").trim();
+		return et === "Gate Out" || et === "Job Work Out";
 	}
 
 	render_outbound_items() {
