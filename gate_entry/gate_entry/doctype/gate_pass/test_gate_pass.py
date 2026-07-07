@@ -591,3 +591,51 @@ class TestGatePass(FrappeTestCase):
 		self.assertEqual(result["company"], "Thusma SMS Nonwovens Private Limited - 1Z0")
 		self.assertEqual(result["receiver_company"], "Jayashree Spun Bond - 1ZT")
 		self.assertEqual(result["party"], "Jayashree Spun Bond - 1ZT")
+
+	def test_derive_job_work_out_at_sender_thusma_to_jsb(self):
+		gate_pass = self.create_gate_pass(
+			company="Thusma SMS Nonwovens Private Limited - 1Z0",
+			reference_number="MAT-STE-02916",
+			entry_type="Gate Out",
+		)
+		mock_ste = MockDoc(
+			stock_entry_type="Material Transfer",
+			company="Thusma SMS Nonwovens Private Limited - 1Z0",
+			transfer_to_company="Jayashree Spun Bond - 1ZT",
+			party_type="Company",
+			party="Jayashree Spun Bond - 1ZT",
+		)
+		with patch("frappe.get_cached_doc", return_value=mock_ste):
+			self.assertEqual(gate_pass.derive_entry_type_from_stock_entry(), "Job Work Out")
+
+	def test_derive_job_work_in_at_receiver_jsb_from_thusma(self):
+		gate_pass = self.create_gate_pass(
+			company="Jayashree Spun Bond - 1ZT",
+			reference_number="MAT-STE-02916",
+			entry_type="Gate In",
+		)
+		mock_ste = MockDoc(
+			stock_entry_type="Material Transfer",
+			company="Thusma SMS Nonwovens Private Limited - 1Z0",
+			transfer_to_company="Jayashree Spun Bond - 1ZT",
+			party_type="Company",
+			party="Jayashree Spun Bond - 1ZT",
+		)
+		with patch("frappe.get_cached_doc", return_value=mock_ste):
+			self.assertEqual(gate_pass.derive_entry_type_from_stock_entry(), "Job Work In")
+
+	def test_derive_job_work_out_at_sender_jsb_to_thusma(self):
+		gate_pass = self.create_gate_pass(
+			company="Jayashree Spun Bond - 1ZT",
+			reference_number="MAT-STE-02915",
+			entry_type="Gate Out",
+		)
+		mock_ste = MockDoc(
+			stock_entry_type="Material Transfer",
+			company="Jayashree Spun Bond - 1ZT",
+			transfer_to_company="Thusma SMS Nonwovens Private Limited - 1Z0",
+			party_type="Company",
+			party="Thusma SMS Nonwovens Private Limited - 1Z0",
+		)
+		with patch("frappe.get_cached_doc", return_value=mock_ste):
+			self.assertEqual(gate_pass.derive_entry_type_from_stock_entry(), "Job Work Out")

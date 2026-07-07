@@ -27,12 +27,14 @@ const JSB_JOB_WORK_COMPANIES = new Set([
 ]);
 
 // (receiving GP company, STE sender company) → warehouse. Keep in sync with constants.py
-const JOB_WORK_IN_DEST_WAREHOUSE_MAP = {
+const JOB_WORK_DEST_WAREHOUSE_MAP = {
 	[THUSMA_JOB_WORK_COMPANY + "|Jayashree Spun Bond - 1ZT"]: "Jayashree 1ZT - JWO RM - TSNPL",
 	[THUSMA_JOB_WORK_COMPANY + "|Jayashree Spun Bond - 2ZS"]: "Jayashree 2ZS - JWO RM - TSNPL",
 	["Jayashree Spun Bond - 1ZT|" + THUSMA_JOB_WORK_COMPANY]: "Thusma 1Z0 - JWI FG - JSB-1ZT",
 	["Jayashree Spun Bond - 2ZS|" + THUSMA_JOB_WORK_COMPANY]: "Thusma 1Z0 - JWI FG - JSB-2ZS",
 };
+// Backwards-compatible alias
+const JOB_WORK_IN_DEST_WAREHOUSE_MAP = JOB_WORK_DEST_WAREHOUSE_MAP;
 
 const MATERIAL_TRANSFER_STOCK_ENTRY_TYPE = "Material Transfer";
 
@@ -423,24 +425,39 @@ function is_job_work_company_pair(company_a, company_b) {
 
 function resolve_job_work_in_warehouse(gp_company, ste_sender_company) {
 	const key = (gp_company || "").trim() + "|" + (ste_sender_company || "").trim();
-	return JOB_WORK_IN_DEST_WAREHOUSE_MAP[key] || "";
+	return JOB_WORK_DEST_WAREHOUSE_MAP[key] || "";
 }
 
 function show_job_work_warehouse_hint(frm) {
-	if (
-		frm.doc.document_reference !== STOCK_ENTRY_REFERENCE ||
-		frm.doc.entry_type !== "Job Work In" ||
-		!frm.doc.company ||
-		!frm._referenced_ste_company
-	) {
+	if (frm.doc.document_reference !== STOCK_ENTRY_REFERENCE || !frm.doc.company) {
 		return;
 	}
-	const wh = resolve_job_work_in_warehouse(frm.doc.company, frm._referenced_ste_company);
-	if (wh) {
-		frappe.show_alert({
-			message: __("Job Work In: goods will be received into {0}", [wh]),
-			indicator: "blue",
-		});
+	const ste = (frm._referenced_ste_company || "").trim();
+	const receiver = (frm._referenced_ste_receiver || "").trim();
+	const gp = (frm.doc.company || "").trim();
+
+	if (frm.doc.entry_type === "Job Work In" && ste) {
+		const wh = resolve_job_work_in_warehouse(gp, ste);
+		if (wh) {
+			frappe.show_alert({
+				message: __("Job Work In: goods will be received into {0}", [wh]),
+				indicator: "blue",
+			});
+		}
+		return;
+	}
+
+	if (frm.doc.entry_type === "Job Work Out" && receiver && ste && gp === ste) {
+		const wh = resolve_job_work_in_warehouse(receiver, ste);
+		if (wh) {
+			frappe.show_alert({
+				message: __(
+					"Job Work Out: after submit, create Job Work In at {0} to receive into {1}",
+					[receiver, wh]
+				),
+				indicator: "blue",
+			});
+		}
 	}
 }
 
@@ -487,17 +504,18 @@ function suggest_stock_entry_entry_type(frm) {
 		const gp = (frm.doc.company || "").trim();
 		const ste = (frm._referenced_ste_company || "").trim();
 		const receiver = (frm._referenced_ste_receiver || "").trim();
+		// Job work (Thusma ↔ JSB): sender = Job Work Out, receiver = Job Work In.
+		if (gp && ste && gp === ste && is_job_work_company_pair(gp, receiver)) {
+			return frm.set_value("entry_type", "Job Work Out");
+		}
 		if (gp && ste && gp !== ste) {
-			if (is_job_work_company_pair(gp, ste)) {
+			if (is_job_work_company_pair(gp, ste) || is_job_work_company_pair(gp, receiver)) {
 				return frm.set_value("entry_type", "Job Work In");
 			}
 			if (INTERCOMPANY_WAREHOUSE_MAP[gp]) {
 				return frm.set_value("entry_type", "Gate In");
 			}
 			return frm.set_value("entry_type", "Gate In");
-		}
-		if (gp && ste && gp === ste && is_job_work_company_pair(gp, receiver)) {
-			return frm.set_value("entry_type", "Job Work Out");
 		}
 		return frm.set_value("entry_type", "Gate Out");
 	});

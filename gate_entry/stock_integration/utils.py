@@ -21,6 +21,30 @@ def is_return_entry(stock_entry) -> bool:
 	return cint(getattr(stock_entry, "is_return", 0)) == 1
 
 
+def get_stock_entry_receiver_company(stock_entry) -> str | None:
+	for fn in ("transfer_to_company", "custom_transfer_to_company"):
+		val = (getattr(stock_entry, fn, None) or "").strip()
+		if val:
+			return val
+	if (getattr(stock_entry, "party_type", None) or "").strip() == "Company":
+		party = (getattr(stock_entry, "party", None) or "").strip()
+		if party:
+			return party
+	return None
+
+
+def is_job_work_intercompany_stock_entry(stock_entry) -> bool:
+	"""True when STE is Material Transfer between Thusma 1Z0 and JSB 1ZT/2ZS."""
+	from gate_entry.constants import JSB_JOB_WORK_COMPANIES, THUSMA_JOB_WORK_COMPANY
+
+	sender = (getattr(stock_entry, "company", None) or "").strip()
+	receiver = get_stock_entry_receiver_company(stock_entry)
+	if not sender or not receiver or sender == receiver:
+		return False
+	participants = {THUSMA_JOB_WORK_COMPANY, *JSB_JOB_WORK_COMPANIES}
+	return sender in participants and receiver in participants
+
+
 def get_original_outbound_transfer(stock_entry):
 	if is_return_entry(stock_entry):
 		return getattr(stock_entry, "return_against", None)
@@ -200,7 +224,8 @@ def create_gate_pass_from_stock_entry(stock_entry_name: str, enqueued_by: str | 
 			gate_pass.outbound_material_transfer = stock_entry.return_against
 			gate_pass.manual_return_flow = 0
 		else:
-			gate_pass.entry_type = "Gate Out"
+			# Job work (Thusma ↔ JSB): auto Job Work Out at sender; receiver creates Job Work In.
+			gate_pass.set_entry_type()
 
 		gate_pass.populate_gate_pass_items(gate_pass.get_stock_entry_items(stock_entry))
 		gate_pass.flags.ignore_mandatory = True

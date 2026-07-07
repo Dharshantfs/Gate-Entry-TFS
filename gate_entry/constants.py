@@ -45,9 +45,12 @@ JSB_JOB_WORK_COMPANIES = frozenset(
 	}
 )
 
-# Job Work In: (receiving GP company, STE sender company) → destination warehouse.
-# Keep gate_pass.js JOB_WORK_IN_DEST_WAREHOUSE_MAP in sync.
-JOB_WORK_IN_DEST_WAREHOUSE_MAP = {
+# Job-work destination warehouse: (receiving GP company, STE sender company) → warehouse.
+# Used when receiver submits Job Work In after sender's Job Work Out.
+# Flow: JSB→Thusma RM — Job Work Out @ JSB (auto), Job Work In @ Thusma.
+#       Thusma→JSB FG — Job Work Out @ Thusma (auto), Job Work In @ JSB.
+# Keep gate_pass.js JOB_WORK_DEST_WAREHOUSE_MAP in sync.
+JOB_WORK_DEST_WAREHOUSE_MAP = {
 	# RM received at Thusma — JSB sent job work RM
 	(THUSMA_JOB_WORK_COMPANY, "Jayashree Spun Bond - 1ZT"): "Jayashree 1ZT - JWO RM - TSNPL",
 	(THUSMA_JOB_WORK_COMPANY, "Jayashree Spun Bond - 2ZS"): "Jayashree 2ZS - JWO RM - TSNPL",
@@ -55,6 +58,9 @@ JOB_WORK_IN_DEST_WAREHOUSE_MAP = {
 	("Jayashree Spun Bond - 1ZT", THUSMA_JOB_WORK_COMPANY): "Thusma 1Z0 - JWI FG - JSB-1ZT",
 	("Jayashree Spun Bond - 2ZS", THUSMA_JOB_WORK_COMPANY): "Thusma 1Z0 - JWI FG - JSB-2ZS",
 }
+
+# Backwards-compatible alias
+JOB_WORK_IN_DEST_WAREHOUSE_MAP = JOB_WORK_DEST_WAREHOUSE_MAP
 
 INBOUND_STOCK_ENTRY_ENTRY_TYPES = frozenset({"Gate In", "Job Work In"})
 OUTBOUND_STOCK_ENTRY_ENTRY_TYPES = frozenset({"Gate Out", "Job Work Out"})

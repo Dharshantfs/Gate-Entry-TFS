@@ -249,15 +249,17 @@ class GatePass(Document):
 				return "Gate In"
 			gp_company = _normalize_entry_type(self.company)
 			ste_company = _normalize_entry_type(stock_entry.company)
-			if gp_company and ste_company and gp_company != ste_company:
-				if _is_job_work_company_pair(gp_company, ste_company):
-					return "Job Work In"
-				return "Gate In"
 			receiver = _stock_entry_receiver_company(stock_entry)
-			if gp_company and ste_company and gp_company == ste_company and _is_job_work_company_pair(
+			# Job work (Thusma ↔ JSB): sender GP = Job Work Out, receiver GP = Job Work In.
+			if _is_job_work_company_pair(gp_company, ste_company) or _is_job_work_company_pair(
 				gp_company, receiver
 			):
-				return "Job Work Out"
+				if gp_company and ste_company and gp_company == ste_company:
+					return "Job Work Out"
+				if gp_company and ste_company and gp_company != ste_company:
+					return "Job Work In"
+			if gp_company and ste_company and gp_company != ste_company:
+				return "Gate In"
 			return "Gate Out"
 
 		if stock_utils.is_send_to_subcontractor(stock_entry):
@@ -1085,7 +1087,7 @@ class GatePass(Document):
 					frappe.throw(
 						_(
 							"No job-work inbound warehouse configured for receiving company {0} "
-							"with sender {1}. Update JOB_WORK_IN_DEST_WAREHOUSE_MAP in gate_entry/constants.py."
+							"with sender {1}. Update JOB_WORK_DEST_WAREHOUSE_MAP in gate_entry/constants.py."
 						).format(dst_company, src_company)
 					)
 
