@@ -279,7 +279,7 @@ frappe.ui.form.on("Gate Pass", {
 			if (frm.doc.document_reference === STOCK_ENTRY_REFERENCE) {
 				suggest_stock_entry_entry_type(frm).then(() => load_reference_items(frm));
 				clear_compliance_status(frm);
-			} else if (is_outbound_reference(frm.doc.document_reference, frm.doc.entry_type)) {
+			} else if (is_outbound_reference(frm.doc.document_reference, frm.doc.entry_type, frm)) {
 				load_reference_items(frm);
 				refresh_compliance_status(frm);
 			} else {
@@ -423,7 +423,30 @@ function is_job_work_company_pair(company_a, company_b) {
 	return is_job_work_participant(a) && is_job_work_participant(b);
 }
 
-function resolve_job_work_in_warehouse(gp_company, ste_sender_company) {
+function is_job_work_receiver_gate_pass(frm) {
+	if (frm.doc.document_reference !== STOCK_ENTRY_REFERENCE) {
+		return false;
+	}
+	if ((frm.doc.entry_type || "").trim() !== "Job Work Out") {
+		return false;
+	}
+	const gp = (frm.doc.company || "").trim();
+	const ste = (frm._referenced_ste_company || "").trim();
+	const receiver = (frm._referenced_ste_receiver || "").trim();
+	if (!gp || !ste || gp === ste) {
+		return false;
+	}
+	return is_job_work_company_pair(gp, ste) || is_job_work_company_pair(gp, receiver);
+}
+
+function is_inbound_stock_entry_gate_pass(frm) {
+	return (
+		frm.doc.document_reference === STOCK_ENTRY_REFERENCE &&
+		(is_inbound_entry_type(frm.doc.entry_type) || is_job_work_receiver_gate_pass(frm))
+	);
+}
+
+function resolve_job_work_dest_warehouse(gp_company, ste_sender_company) {
 	const key = (gp_company || "").trim() + "|" + (ste_sender_company || "").trim();
 	return JOB_WORK_DEST_WAREHOUSE_MAP[key] || "";
 }
@@ -437,7 +460,7 @@ function show_job_work_warehouse_hint(frm) {
 	const gp = (frm.doc.company || "").trim();
 
 	if (frm.doc.entry_type === "Job Work In" && ste) {
-		const wh = resolve_job_work_in_warehouse(gp, ste);
+		const wh = resolve_job_work_dest_warehouse(gp, ste);
 		if (wh) {
 			frappe.show_alert({
 				message: __("Job Work In: goods will be received into {0}", [wh]),
@@ -447,12 +470,23 @@ function show_job_work_warehouse_hint(frm) {
 		return;
 	}
 
+	if (frm.doc.entry_type === "Job Work Out" && is_job_work_receiver_gate_pass(frm) && ste) {
+		const wh = resolve_job_work_dest_warehouse(gp, ste);
+		if (wh) {
+			frappe.show_alert({
+				message: __("Job Work Out: goods will be received into {0}", [wh]),
+				indicator: "blue",
+			});
+		}
+		return;
+	}
+
 	if (frm.doc.entry_type === "Job Work Out" && receiver && ste && gp === ste) {
-		const wh = resolve_job_work_in_warehouse(receiver, ste);
+		const wh = resolve_job_work_dest_warehouse(receiver, ste);
 		if (wh) {
 			frappe.show_alert({
 				message: __(
-					"Job Work Out: after submit, create Job Work In at {0} to receive into {1}",
+					"Job Work Out: after submit, create Job Work Out at {0} to receive into {1}",
 					[receiver, wh]
 				),
 				indicator: "blue",
@@ -504,14 +538,14 @@ function suggest_stock_entry_entry_type(frm) {
 		const gp = (frm.doc.company || "").trim();
 		const ste = (frm._referenced_ste_company || "").trim();
 		const receiver = (frm._referenced_ste_receiver || "").trim();
-		// Job work (Thusma ↔ JSB): sender = Job Work Out, receiver = Job Work In.
-		if (gp && ste && gp === ste && is_job_work_company_pair(gp, receiver)) {
+		// Job work (Thusma ↔ JSB): always Job Work Out (sender or receiver).
+		if (
+			is_job_work_company_pair(gp, ste) ||
+			is_job_work_company_pair(gp, receiver)
+		) {
 			return frm.set_value("entry_type", "Job Work Out");
 		}
 		if (gp && ste && gp !== ste) {
-			if (is_job_work_company_pair(gp, ste) || is_job_work_company_pair(gp, receiver)) {
-				return frm.set_value("entry_type", "Job Work In");
-			}
 			if (INTERCOMPANY_WAREHOUSE_MAP[gp]) {
 				return frm.set_value("entry_type", "Gate In");
 			}
@@ -528,13 +562,6 @@ function is_intercompany_material_transfer_gate_in(frm) {
 		!!INTERCOMPANY_WAREHOUSE_MAP[frm.doc.company] &&
 		(!frm._referenced_stock_entry_type ||
 			frm._referenced_stock_entry_type === MATERIAL_TRANSFER_STOCK_ENTRY_TYPE)
-	);
-}
-
-function is_inbound_stock_entry_gate_pass(frm) {
-	return (
-		frm.doc.document_reference === STOCK_ENTRY_REFERENCE &&
-		is_inbound_entry_type(frm.doc.entry_type)
 	);
 }
 
@@ -776,7 +803,7 @@ function load_reference_details(frm) {
 			if (details.driver_contact && !frm.doc.driver_contact) {
 				updates.driver_contact = details.driver_contact;
 			}
-			if (is_outbound_reference(frm.doc.document_reference, frm.doc.entry_type)) {
+			if (is_outbound_reference(frm.doc.document_reference, frm.doc.entry_type, frm)) {
 				updates.supplier = null;
 				updates.supplier_delivery_note = null;
 			} else if (details.party_type === "Supplier" && details.party) {
@@ -834,6 +861,7 @@ function load_reference_items(frm) {
 				document_reference: frm.doc.document_reference,
 				reference_number: frm.doc.reference_number,
 				entry_type: frm.doc.entry_type,
+				gp_company: frm.doc.company,
 			},
 			freeze: true,
 			freeze_message: __("Loading items from reference document..."),
@@ -860,7 +888,8 @@ function set_gate_pass_items(frm, items) {
 
 	// For inter-company / job-work inbound Gate passes, pre-fill received_qty from STE qty.
 	const is_intercompany_gate_in = is_intercompany_material_transfer_gate_in(frm);
-	const is_job_work_in = frm.doc.entry_type === "Job Work In";
+	const is_job_work_receive =
+		frm.doc.entry_type === "Job Work In" || is_job_work_receiver_gate_pass(frm);
 
 	(items || []).forEach((item) => {
 		const row = frm.add_child("gate_pass_table");
@@ -874,7 +903,7 @@ function set_gate_pass_items(frm, items) {
 		row.ordered_qty = item.ordered_qty || 0;
 		// For inter-company Gate In pre-fill received_qty = ordered_qty
 		// so guard sees what was dispatched; they can reduce if short-received.
-		if (is_intercompany_gate_in || is_job_work_in) {
+		if (is_intercompany_gate_in || is_job_work_receive) {
 			row.received_qty = item.ordered_qty || 0;
 			row.dispatched_qty = 0;
 		} else if (is_inbound) {
@@ -890,7 +919,8 @@ function set_gate_pass_items(frm, items) {
 		row.rate = item.rate || 0;
 		const qty_for_amount = is_outbound_reference(
 			frm.doc.document_reference,
-			frm.doc.entry_type
+			frm.doc.entry_type,
+			frm
 		)
 			? row.dispatched_qty || 0
 			: row.received_qty || 0;
@@ -898,7 +928,7 @@ function set_gate_pass_items(frm, items) {
 		// For inter-company Gate In: clear warehouse (avoid Link field validation crash).
 		// Guard can leave blank; Python on_submit fills from the inter-company warehouse map.
 		// For same-company: use the warehouse from reference document.
-		row.warehouse = is_intercompany_gate_in || is_job_work_in ? "" : (item.warehouse || "");
+		row.warehouse = is_intercompany_gate_in || is_job_work_receive ? "" : (item.warehouse || "");
 		row.rejected_warehouse = item.rejected_warehouse || "";
 		row.expense_account = item.expense_account || "";
 		row.cost_center = item.cost_center || "";
@@ -925,7 +955,7 @@ function set_gate_pass_items(frm, items) {
 			),
 			indicator: "blue",
 		});
-	} else if (is_job_work_in) {
+	} else if (is_job_work_receive) {
 		frappe.show_alert({
 			message: __("Received Qty pre-filled. Warehouse set on submit from job-work rules."),
 			indicator: "blue",
@@ -951,8 +981,11 @@ function toggle_discrepancy_fields(frm) {
 	frm.toggle_reqd("damaged_quantity", show);
 }
 
-function is_outbound_reference(documentReference, entryType) {
+function is_outbound_reference(documentReference, entryType, frm) {
 	if (documentReference === STOCK_ENTRY_REFERENCE) {
+		if (frm && is_job_work_receiver_gate_pass(frm)) {
+			return false;
+		}
 		return is_outbound_entry_type(entryType);
 	}
 	return OUTBOUND_REFERENCES.includes(documentReference);
@@ -979,7 +1012,7 @@ function refresh_compliance_status(frm) {
 	if (
 		!frm.doc.document_reference ||
 		!frm.doc.reference_number ||
-		!is_outbound_reference(frm.doc.document_reference, frm.doc.entry_type)
+		!is_outbound_reference(frm.doc.document_reference, frm.doc.entry_type, frm)
 	) {
 		clear_compliance_status(frm);
 		return;

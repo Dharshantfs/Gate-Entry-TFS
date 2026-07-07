@@ -32,12 +32,35 @@ class GatePassCustomUI {
 
 	isGateOut() {
 		const et = (this.frm?.doc?.entry_type || "Gate Out").trim();
+		if (this.isJobWorkReceiverGatePass()) {
+			return false;
+		}
 		return et === "Gate Out" || et === "Job Work Out";
 	}
 
 	isGateIn() {
 		const et = (this.frm?.doc?.entry_type || "Gate Out").trim();
+		if (this.isJobWorkReceiverGatePass()) {
+			return true;
+		}
 		return et === "Gate In" || et === "Job Work In";
+	}
+
+	isJobWorkReceiverGatePass() {
+		if (!this.isStockEntry() || (this.frm?.doc?.entry_type || "").trim() !== "Job Work Out") {
+			return false;
+		}
+		const gp = (this.frm?.doc?.company || "").trim();
+		const ste = (this.frm?._referenced_ste_company || "").trim();
+		const receiver = (this.frm?._referenced_ste_receiver || "").trim();
+		if (!gp || !ste || gp === ste) {
+			return false;
+		}
+		const THUSMA = "Thusma SMS Nonwovens Private Limited - 1Z0";
+		const JSB = new Set(["Jayashree Spun Bond - 1ZT", "Jayashree Spun Bond - 2ZS"]);
+		const isParticipant = (c) => c === THUSMA || JSB.has(c);
+		const isPair = (a, b) => a && b && a !== b && isParticipant(a) && isParticipant(b);
+		return isPair(gp, ste) || isPair(gp, receiver);
 	}
 
 	isStockEntry() {
@@ -1056,6 +1079,9 @@ class GatePassCustomUI {
 	}
 
 	isOutbound() {
+		if (this.isJobWorkReceiverGatePass()) {
+			return false;
+		}
 		const et = (this.frm?.doc?.entry_type || "Gate Out").trim();
 		return et === "Gate Out" || et === "Job Work Out";
 	}

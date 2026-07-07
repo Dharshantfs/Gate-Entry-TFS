@@ -224,7 +224,7 @@ def create_gate_pass_from_stock_entry(stock_entry_name: str, enqueued_by: str | 
 			gate_pass.outbound_material_transfer = stock_entry.return_against
 			gate_pass.manual_return_flow = 0
 		else:
-			# Job work (Thusma ↔ JSB): auto Job Work Out at sender; receiver creates Job Work In.
+			# Job work (Thusma ↔ JSB): auto Job Work Out at sender; receiver also Job Work Out.
 			gate_pass.set_entry_type()
 
 		gate_pass.populate_gate_pass_items(gate_pass.get_stock_entry_items(stock_entry))

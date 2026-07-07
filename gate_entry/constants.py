@@ -46,9 +46,10 @@ JSB_JOB_WORK_COMPANIES = frozenset(
 )
 
 # Job-work destination warehouse: (receiving GP company, STE sender company) → warehouse.
-# Used when receiver submits Job Work In after sender's Job Work Out.
-# Flow: JSB→Thusma RM — Job Work Out @ JSB (auto), Job Work In @ Thusma.
-#       Thusma→JSB FG — Job Work Out @ Thusma (auto), Job Work In @ JSB.
+# Job-work destination warehouse: (receiving GP company, STE sender company) → warehouse.
+# Both sender and receiver use Job Work Out; receiver submit stores into mapped warehouse.
+# Flow: JSB→Thusma RM — Job Work Out @ JSB (auto), Job Work Out @ Thusma (receive).
+#       Thusma→JSB FG — Job Work Out @ Thusma (auto), Job Work Out @ JSB (receive).
 # Keep gate_pass.js JOB_WORK_DEST_WAREHOUSE_MAP in sync.
 JOB_WORK_DEST_WAREHOUSE_MAP = {
 	# RM received at Thusma — JSB sent job work RM

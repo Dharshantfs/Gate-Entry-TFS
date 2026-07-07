@@ -608,7 +608,7 @@ class TestGatePass(FrappeTestCase):
 		with patch("frappe.get_cached_doc", return_value=mock_ste):
 			self.assertEqual(gate_pass.derive_entry_type_from_stock_entry(), "Job Work Out")
 
-	def test_derive_job_work_in_at_receiver_jsb_from_thusma(self):
+	def test_derive_job_work_out_at_receiver_jsb_from_thusma(self):
 		gate_pass = self.create_gate_pass(
 			company="Jayashree Spun Bond - 1ZT",
 			reference_number="MAT-STE-02916",
@@ -622,7 +622,31 @@ class TestGatePass(FrappeTestCase):
 			party="Jayashree Spun Bond - 1ZT",
 		)
 		with patch("frappe.get_cached_doc", return_value=mock_ste):
-			self.assertEqual(gate_pass.derive_entry_type_from_stock_entry(), "Job Work In")
+			self.assertEqual(gate_pass.derive_entry_type_from_stock_entry(), "Job Work Out")
+			self.assertTrue(gate_pass._is_job_work_receiver_gate_pass(mock_ste))
+
+	def test_stock_entry_items_qty_for_job_work_out_receiver(self):
+		from gate_entry.gate_entry.doctype.gate_pass.gate_pass import (
+			_is_job_work_receiver_entry,
+			_stock_entry_items_qty_for_entry_type,
+		)
+
+		self.assertTrue(
+			_is_job_work_receiver_entry(
+				"Job Work Out",
+				"Jayashree Spun Bond - 1ZT",
+				"Thusma SMS Nonwovens Private Limited - 1Z0",
+				"Jayashree Spun Bond - 1ZT",
+			)
+		)
+		received, dispatched = _stock_entry_items_qty_for_entry_type(
+			76.15,
+			"Job Work Out",
+			False,
+			job_work_receive=True,
+		)
+		self.assertEqual(received, 76.15)
+		self.assertEqual(dispatched, 0.0)
 
 	def test_derive_job_work_out_at_sender_jsb_to_thusma(self):
 		gate_pass = self.create_gate_pass(
