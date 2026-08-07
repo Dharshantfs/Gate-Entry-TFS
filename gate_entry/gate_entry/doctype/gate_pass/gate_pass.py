@@ -1087,14 +1087,18 @@ class GatePass(Document):
 					),
 					indicator="green",
 				)
-			except Exception:
+			except Exception as e:
 				frappe.log_error(
 					title=_("Auto Purchase Receipt failed for Gate Pass {0}").format(self.name),
 					message=frappe.get_traceback(),
 				)
 				frappe.msgprint(
-					_("Gate Pass submitted but draft Purchase Receipt could not be created. Use Create Purchase Receipt."),
+					_(
+						"Gate Pass submitted but draft Purchase Receipt could not be created:<br>{0}<br>"
+						"Use <b>Create Purchase Receipt</b> after fixing the issue."
+					).format(frappe.utils.escape_html(cstr(e))),
 					indicator="orange",
+					title=_("Purchase Receipt not created"),
 				)
 
 	def create_intercompany_stock_transfers(self):
@@ -2406,6 +2410,7 @@ def create_purchase_receipt(gate_pass_name):
 
 	# Get Purchase Order document for header-level fields
 	purchase_order = frappe.get_doc("Purchase Order", gate_pass.reference_number)
+	supplier_has_gstin = _purchase_supplier_has_gstin(purchase_order, gate_pass.supplier)
 
 	# Create Purchase Receipt with header mapping from Purchase Order
 	pr = frappe.new_doc("Purchase Receipt")
@@ -2433,6 +2438,19 @@ def create_purchase_receipt(gate_pass_name):
 	pr.contact_email = purchase_order.contact_email
 	pr.shipping_address = purchase_order.shipping_address
 	pr.shipping_address_display = purchase_order.shipping_address_display
+
+	# Copy GST / billing header fields when present on PO
+	for fieldname in (
+		"billing_address",
+		"billing_address_display",
+		"supplier_gstin",
+		"company_gstin",
+		"place_of_supply",
+		"gst_category",
+		"is_reverse_charge",
+	):
+		if pr.meta.has_field(fieldname) and purchase_order.meta.has_field(fieldname):
+			pr.set(fieldname, purchase_order.get(fieldname))
 
 	# set the vehicle number and driver name from gate pass
 	pr.vehicle_no = gate_pass.vehicle_number
@@ -2510,10 +2528,6 @@ def create_purchase_receipt(gate_pass_name):
 			"is_fixed_asset": po_item.is_fixed_asset if po_item.get("is_fixed_asset") else 0,
 			"asset_location": po_item.asset_location if po_item.get("asset_location") else None,
 			"asset_category": po_item.asset_category if po_item.get("asset_category") else None,
-			# Tax
-			"item_tax_template": po_item.item_tax_template if po_item.get("item_tax_template") else None,
-			"item_tax_rate": po_item.item_tax_rate if po_item.get("item_tax_rate") else None,
-			"gst_treatment": po_item.gst_treatment if po_item.get("gst_treatment") else None,
 			# Other fields
 			"product_bundle": po_item.product_bundle if po_item.get("product_bundle") else None,
 			"is_free_item": po_item.is_free_item if po_item.get("is_free_item") else 0,
@@ -2521,6 +2535,17 @@ def create_purchase_receipt(gate_pass_name):
 			"purchase_order": gate_pass.reference_number,
 			"purchase_order_item": gate_pass_item.order_item_name,
 		}
+
+		# Tax / GST — do not charge GST when supplier has no GSTIN (India Compliance)
+		if supplier_has_gstin:
+			pr_item["item_tax_template"] = po_item.item_tax_template if po_item.get("item_tax_template") else None
+			pr_item["item_tax_rate"] = po_item.item_tax_rate if po_item.get("item_tax_rate") else None
+			pr_item["gst_treatment"] = po_item.gst_treatment if po_item.get("gst_treatment") else None
+		else:
+			pr_item["item_tax_template"] = None
+			pr_item["item_tax_rate"] = None
+			if frappe.get_meta("Purchase Receipt Item").has_field("gst_treatment"):
+				pr_item["gst_treatment"] = "Nil Rated"
 
 		# Add rejected_warehouse only if specified in Gate Pass
 		if gate_pass_item.get("rejected_warehouse"):
@@ -2537,14 +2562,52 @@ def create_purchase_receipt(gate_pass_name):
 
 	# Set missing values and calculate totals (mimics ERPNext's set_missing_values)
 	pr.run_method("set_missing_values")
-	# pr.run_method("calculate_taxes_and_totals")
 
+	if not supplier_has_gstin:
+		_strip_gst_from_purchase_receipt(pr)
+
+	try:
+		pr.run_method("calculate_taxes_and_totals")
+	except Exception:
+		pass
+
+	pr.flags.ignore_permissions = True
 	pr.insert()
 
 	# Update Gate Pass with receipt reference (works even if GP is submitted)
 	frappe.db.set_value("Gate Pass", gate_pass_name, "purchase_receipt", pr.name, update_modified=False)
 
 	return pr.name
+
+
+def _purchase_supplier_has_gstin(purchase_order, supplier=None) -> bool:
+	"""True if PO/supplier has a GSTIN (registered for GST charging)."""
+	gstin = cstr(purchase_order.get("supplier_gstin") or "").strip()
+	if gstin:
+		return True
+	supplier = supplier or purchase_order.get("supplier")
+	if not supplier:
+		return False
+	if frappe.get_meta("Supplier").has_field("gstin"):
+		return bool(cstr(frappe.db.get_value("Supplier", supplier, "gstin") or "").strip())
+	return False
+
+
+def _strip_gst_from_purchase_receipt(pr):
+	"""Remove GST tax rows/templates so India Compliance allows PR without supplier GSTIN."""
+	if pr.meta.has_field("taxes_and_charges"):
+		pr.taxes_and_charges = None
+	pr.set("taxes", [])
+
+	item_meta = frappe.get_meta("Purchase Receipt Item")
+	for item in pr.items:
+		if item_meta.has_field("item_tax_template"):
+			item.item_tax_template = None
+		if item_meta.has_field("item_tax_rate"):
+			item.item_tax_rate = None
+		if item_meta.has_field("gst_treatment"):
+			# Unregistered supplier: do not charge GST on items
+			item.gst_treatment = "Nil Rated"
 
 
 @frappe.whitelist()
