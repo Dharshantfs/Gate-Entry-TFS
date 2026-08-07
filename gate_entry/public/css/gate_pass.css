@@ -3,6 +3,8 @@
  * Modern, clean design with mobile responsiveness
  */
 
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@600;700;800&display=swap");
+
 /* Main Container */
 .gate-pass-custom-ui {
 	background: #fff;
@@ -294,33 +296,38 @@
 	background: #c6f6d5;
 }
 
-/* Column Layout */
+/* Column Layout — name sized to content; qty+Ton fill the gap */
 .item-col {
-	padding: 0 10px;
+	padding: 0 8px;
 	display: flex;
 	align-items: center;
+	min-width: 0;
 }
 
 .item-code-col {
-	flex: 0 0 150px;
+	flex: 0 0 130px;
 	font-weight: 600;
 	color: #2d3748;
 }
 
 .item-name-col {
-	flex: 1 1 auto;
+	flex: 0 1 auto;
+	min-width: 100px;
+	max-width: 36%;
 	color: #4a5568;
 	font-size: 14px;
 }
 
 .received-qty-col {
-	flex: 0 0 220px;
-	align-items: flex-start;
+	flex: 1 1 240px;
+	min-width: 200px;
+	align-items: center;
+	justify-content: flex-start;
 }
 
 .actions-col,
 .outbound-actions {
-	flex: 0 0 100px;
+	flex: 0 0 88px;
 	display: flex;
 	gap: 8px;
 	justify-content: flex-end;
@@ -337,8 +344,13 @@
 }
 
 .item-name {
+	display: block;
 	font-size: 14px;
 	line-height: 1.5;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-width: 100%;
 }
 
 /* Quantity Input */
@@ -593,6 +605,22 @@
 	.received-qty-col {
 		display: flex;
 		flex-direction: column;
+		max-width: none;
+		min-width: 0;
+	}
+
+	.item-name-col {
+		max-width: none;
+	}
+
+	.qty-field-stack {
+		flex-wrap: wrap;
+	}
+
+	.qty-field-stack .quantity-input {
+		flex: 1 1 140px;
+		width: 100% !important;
+		max-width: 100%;
 	}
 
 	.actions-col,
@@ -642,12 +670,17 @@
 		flex: 0 0 120px;
 	}
 
+	.item-name-col {
+		max-width: 32%;
+	}
+
 	.received-qty-col {
-		flex: 0 0 130px;
+		flex: 1 1 220px;
+		min-width: 180px;
 	}
 
 	.actions-col {
-		flex: 0 0 90px;
+		flex: 0 0 88px;
 	}
 }
 
@@ -725,47 +758,47 @@
 	100% { transform: translate(-50%, -50%) rotate(360deg); }
 }
 
-/* Raw Material Ton visual (stored Kg, display Ton) */
-@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@600;700;800&display=swap");
-
+/* Raw Material Ton — sits beside qty so the old empty gap shows words */
 .qty-field-stack {
 	display: flex;
-	flex-direction: column;
-	align-items: stretch;
-	gap: 6px;
+	flex-direction: row;
+	flex-wrap: nowrap;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 12px;
 	width: 100%;
 	min-width: 0;
 }
 
 .qty-field-stack .quantity-input {
-	width: 100%;
-	min-width: 0;
-	max-width: 100%;
+	flex: 0 0 118px;
+	width: 118px !important;
+	min-width: 118px;
+	max-width: 118px;
 	box-sizing: border-box;
 	font-variant-numeric: tabular-nums;
 	font-size: 14px;
 	font-weight: 600;
 	text-align: right;
-	padding: 6px 10px;
+	padding: 6px 8px;
 }
 
 .qty-ton-hint {
-	display: flex;
+	display: inline-flex;
 	flex-direction: row;
 	flex-wrap: nowrap;
 	align-items: center;
-	justify-content: flex-end;
+	justify-content: flex-start;
 	gap: 4px;
-	width: 100%;
+	flex: 0 1 auto;
+	min-width: 0;
 	font-family: "DM Sans", "Segoe UI", system-ui, sans-serif;
-	font-size: 13px;
+	font-size: 15px;
 	font-weight: 700;
 	letter-spacing: 0.01em;
 	color: #0f766e;
 	line-height: 1.2;
 	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
 }
 
 .qty-ton-hint .qty-ton-approx {
@@ -792,6 +825,7 @@
 	color: #0d5c56;
 }
 
+.items-list-header .item-name-col,
 .items-list-header .received-qty-col {
 	align-items: center;
 }
