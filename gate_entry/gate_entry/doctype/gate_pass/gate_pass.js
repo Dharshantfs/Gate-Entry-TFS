@@ -178,6 +178,30 @@ frappe.ui.form.on("Gate Pass", {
 		if (!frm.doc.driver_photo) {
 			frappe.msgprint(__("Driver Photo is mandatory before submitting."));
 			frappe.validated = false;
+			return;
+		}
+
+		// PO Gate In: require location via modern warehouse picker before submit
+		if (
+			frm.doc.document_reference === "Purchase Order" &&
+			!frm.doc.location &&
+			!frm._po_location_confirmed
+		) {
+			frappe.validated = false;
+			show_po_location_picker(frm).then((warehouse) => {
+				if (!warehouse) {
+					return;
+				}
+				frm._po_location_confirmed = true;
+				frm.set_value("location", warehouse).then(() => {
+					(frm.doc.gate_pass_table || []).forEach((row) => {
+						if (parseFloat(row.received_qty || 0) > 0) {
+							frappe.model.set_value(row.doctype, row.name, "warehouse", warehouse);
+						}
+					});
+					frm.save("Submit");
+				});
+			});
 		}
 	},
 
@@ -862,6 +886,7 @@ function load_reference_items(frm) {
 				reference_number: frm.doc.reference_number,
 				entry_type: frm.doc.entry_type,
 				gp_company: frm.doc.company,
+				exclude_gate_pass: frm.doc.name,
 			},
 			freeze: true,
 			freeze_message: __("Loading items from reference document..."),
@@ -936,7 +961,8 @@ function set_gate_pass_items(frm, items) {
 		row.schedule_date = item.schedule_date || "";
 		row.bom = item.bom || "";
 		row.include_exploded_items = item.include_exploded_items || 0;
-		row.order_item_name = item.order_item_name || "";
+			row.order_item_name = item.order_item_name || "";
+		row.item_group = item.item_group || "";
 	});
 
 	frm.refresh_field("gate_pass_table");
@@ -1162,4 +1188,166 @@ function process_qr_scan(frm, qr_text) {
 				indicator: "green",
 			});
 		});
+}
+
+/**
+ * Modern warehouse picker for Purchase Order Gate In.
+ * Company is read-only (PO / Gate Pass company); warehouses of that company only.
+ */
+function show_po_location_picker(frm) {
+	return new Promise((resolve) => {
+		const company = (frm.doc.company || "").trim();
+		if (!company) {
+			frappe.msgprint(__("Set Company before selecting Location."));
+			resolve(null);
+			return;
+		}
+
+		const ensureVue = () => {
+			if (window.Vue) {
+				return Promise.resolve();
+			}
+			return new Promise((res, rej) => {
+				const s = document.createElement("script");
+				s.src = "https://unpkg.com/vue@3/dist/vue.global.prod.js";
+				s.onload = () => res();
+				s.onerror = () => rej(new Error("Failed to load Vue"));
+				document.head.appendChild(s);
+			});
+		};
+
+		ensureVue()
+			.then(() => {
+				frappe.call({
+					method: "gate_entry.gate_entry.doctype.gate_pass.gate_pass.get_warehouses_for_company",
+					args: { company },
+					callback(r) {
+						const warehouses = r.message || [];
+						open_location_vue_dialog(company, warehouses, resolve);
+					},
+				});
+			})
+			.catch(() => {
+				// Fallback without Vue
+				const options = [];
+				frappe.call({
+					method: "gate_entry.gate_entry.doctype.gate_pass.gate_pass.get_warehouses_for_company",
+					args: { company },
+					async: false,
+					callback(r) {
+						(r.message || []).forEach((w) => options.push(w.name));
+					},
+				});
+				frappe.prompt(
+					{
+						label: __("Location (Warehouse)"),
+						fieldname: "location",
+						fieldtype: "Select",
+						options: options.join("\n"),
+						reqd: 1,
+						description: __("Company: {0}", [company]),
+					},
+					(values) => resolve(values.location),
+					__("Select store warehouse"),
+					__("Confirm")
+				);
+			});
+	});
+}
+
+function open_location_vue_dialog(company, warehouses, resolve) {
+	const d = new frappe.ui.Dialog({
+		title: __("Select Location Warehouse"),
+		size: "large",
+		fields: [{ fieldtype: "HTML", fieldname: "vue_host" }],
+		primary_action_label: __("Confirm"),
+		primary_action() {
+			const selected = d._vue_selected;
+			if (!selected) {
+				frappe.msgprint(__("Please select a warehouse."));
+				return;
+			}
+			d.hide();
+			resolve(selected);
+		},
+		secondary_action_label: __("Cancel"),
+		secondary_action() {
+			d.hide();
+			resolve(null);
+		},
+	});
+
+	d.show();
+	const host = d.fields_dict.vue_host.$wrapper.get(0);
+	host.innerHTML = `<div id="po-location-vue-root"></div>`;
+
+	const { createApp, ref, computed } = Vue;
+	const app = createApp({
+		setup() {
+			const search = ref("");
+			const selected = ref("");
+			const filtered = computed(() => {
+				const q = (search.value || "").toLowerCase().trim();
+				if (!q) return warehouses;
+				return warehouses.filter(
+					(w) =>
+						(w.name || "").toLowerCase().includes(q) ||
+						(w.warehouse_name || "").toLowerCase().includes(q)
+				);
+			});
+			const pick = (name) => {
+				selected.value = name;
+				d._vue_selected = name;
+			};
+			return { company, search, selected, filtered, pick };
+		},
+		template: `
+			<div class="po-loc-picker">
+				<div class="po-loc-company">
+					<span class="po-loc-label">{{ __('Company') }}</span>
+					<span class="po-loc-value">{{ company }}</span>
+				</div>
+				<input class="form-control po-loc-search" v-model="search"
+					:placeholder="__('Search warehouse...')" />
+				<div class="po-loc-list">
+					<button type="button" class="po-loc-row"
+						v-for="w in filtered" :key="w.name"
+						:class="{ active: selected === w.name }"
+						@click="pick(w.name)">
+						<span class="po-loc-name">{{ w.name }}</span>
+					</button>
+					<div v-if="!filtered.length" class="text-muted po-loc-empty">
+						{{ __('No warehouses found') }}
+					</div>
+				</div>
+			</div>
+		`,
+	});
+	app.mount("#po-location-vue-root");
+
+	if (!document.getElementById("po-loc-picker-style")) {
+		const style = document.createElement("style");
+		style.id = "po-loc-picker-style";
+		style.textContent = `
+			.po-loc-picker { font-family: inherit; }
+			.po-loc-company {
+				display: flex; flex-direction: column; gap: 4px;
+				padding: 12px 14px; margin-bottom: 12px;
+				border-radius: 10px; background: #f4f5f7;
+			}
+			.po-loc-label { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #6c7680; }
+			.po-loc-value { font-size: 15px; font-weight: 600; color: #1f272e; }
+			.po-loc-search { margin-bottom: 10px; border-radius: 8px; }
+			.po-loc-list { max-height: 320px; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+			.po-loc-row {
+				text-align: left; border: 1px solid #e2e6ea; background: #fff;
+				border-radius: 8px; padding: 10px 12px; cursor: pointer;
+			}
+			.po-loc-row:hover { border-color: #2490ef; }
+			.po-loc-row.active { border-color: #2490ef; background: #eef6ff; }
+			.po-loc-name { font-size: 13px; color: #1f272e; }
+			.po-loc-empty { padding: 16px; text-align: center; }
+		`;
+		document.head.appendChild(style);
+	}
 }

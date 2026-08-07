@@ -591,6 +591,53 @@ class GatePass(Document):
 			self.validate_stock_entry_allocations(allocation_doc, context)
 
 		self.validate_discrepancy_quantities()
+		if self.document_reference == "Purchase Order":
+			self.validate_purchase_order_location_and_allocations()
+
+	def validate_purchase_order_location_and_allocations(self):
+		"""Require location on submit and block over-receipt vs PO remaining."""
+		# Location required when submitting
+		if getattr(self, "_action", None) == "submit" or cint(self.docstatus) == 1:
+			if not cstr(self.location or "").strip():
+				frappe.throw(
+					_("Please select Location (warehouse) before submitting Gate In for Purchase Order.")
+				)
+
+		location = cstr(self.location or "").strip()
+		if location:
+			wh_company = frappe.db.get_value("Warehouse", location, "company")
+			po_company = frappe.db.get_value("Purchase Order", self.reference_number, "company")
+			if wh_company and po_company and wh_company != po_company:
+				frappe.throw(
+					_("Location warehouse {0} belongs to {1}, but Purchase Order company is {2}.").format(
+						location, wh_company, po_company
+					)
+				)
+			if po_company and self.company != po_company:
+				frappe.throw(
+					_("Gate Pass company must match Purchase Order company {0}.").format(po_company)
+				)
+			for item in self.gate_pass_table:
+				if flt(item.received_qty) > 0:
+					item.warehouse = location
+
+		pending_map = {
+			row["order_item_name"]: flt(row.get("pending_qty") or 0)
+			for row in get_purchase_order_items(self.reference_number, exclude_gate_pass=self.name)
+		}
+		for item in self.gate_pass_table:
+			qty = flt(item.received_qty)
+			if qty <= 0 or not item.order_item_name:
+				continue
+			max_allowed = pending_map.get(item.order_item_name)
+			if max_allowed is None:
+				continue
+			if qty - max_allowed > 1e-6:
+				frappe.throw(
+					_("Received quantity for item {0} ({1}) exceeds remaining balance ({2}).").format(
+						item.item_code, qty, max_allowed
+					)
+				)
 
 	def fetch_reference_items(self):
 		if self.document_reference == "Sales Invoice":
@@ -1023,6 +1070,32 @@ class GatePass(Document):
 			ref_company = frappe.db.get_value("Stock Entry", self.reference_number, "company")
 			if ref_company and ref_company != self.company:
 				self.create_intercompany_stock_transfers()
+			elif cstr(self.location or "").strip() == "":
+				# Same-company STE: still record location from first item warehouse if present
+				for row in self.gate_pass_table or []:
+					if row.warehouse:
+						self.db_set("location", row.warehouse, update_modified=False)
+						break
+
+		# PO Gate In: auto-create draft Purchase Receipt with location warehouse
+		if self.document_reference == "Purchase Order" and not self.purchase_receipt:
+			try:
+				pr_name = create_purchase_receipt(self.name)
+				frappe.msgprint(
+					_("Draft Purchase Receipt {0} created. Review and submit to add stock.").format(
+						frappe.utils.get_link_to_form("Purchase Receipt", pr_name)
+					),
+					indicator="green",
+				)
+			except Exception:
+				frappe.log_error(
+					title=_("Auto Purchase Receipt failed for Gate Pass {0}").format(self.name),
+					message=frappe.get_traceback(),
+				)
+				frappe.msgprint(
+					_("Gate Pass submitted but draft Purchase Receipt could not be created. Use Create Purchase Receipt."),
+					indicator="orange",
+				)
 
 	def create_intercompany_stock_transfers(self):
 		"""
@@ -1231,6 +1304,14 @@ class GatePass(Document):
 		# ---- 4. Store references on the Gate Pass ----
 		self.db_set("intercompany_issue_entry", issue_se.name, update_modified=False)
 		self.db_set("intercompany_receipt_entry", receipt_se.name, update_modified=False)
+		# Persist resolved destination warehouse on location (first receipt row)
+		first_dest = None
+		for row in receipt_se.items:
+			if row.t_warehouse:
+				first_dest = row.t_warehouse
+				break
+		if first_dest:
+			self.db_set("location", first_dest, update_modified=False)
 
 		frappe.msgprint(
 			_(
@@ -1634,7 +1715,7 @@ def get_stock_entry_batches(stock_entry_name, item_code):
 
 
 @frappe.whitelist()
-def get_items(document_reference, reference_number, entry_type=None, gp_company=None):
+def get_items(document_reference, reference_number, entry_type=None, gp_company=None, exclude_gate_pass=None):
 	"""
 	Fetch items from the reference document with pending quantities
 
@@ -1667,6 +1748,8 @@ def get_items(document_reference, reference_number, entry_type=None, gp_company=
 
 	if document_reference == "Stock Entry":
 		return fetcher(reference_number, entry_type=entry_type, gp_company=gp_company)
+	if document_reference == "Purchase Order":
+		return fetcher(reference_number, exclude_gate_pass=exclude_gate_pass)
 	return fetcher(reference_number)
 
 
@@ -1685,9 +1768,10 @@ def _stock_entry_items_qty_for_entry_type(
 	return 0.0, flt(transfer_qty)
 
 
-def get_purchase_order_items(purchase_order):
+def get_purchase_order_items(purchase_order, exclude_gate_pass=None):
 	"""
-	Get items from Purchase Order with pending quantities and all item details
+	Get items from Purchase Order with pending quantities and all item details.
+	Pending = ordered - PO Item received_qty (from PRs) - other Gate Pass received_qty.
 	"""
 	# Check if this is a Rate Contract (has_unit_price_items flag)
 	po_doc = frappe.get_doc("Purchase Order", purchase_order)
@@ -1698,19 +1782,28 @@ def get_purchase_order_items(purchase_order):
 		"Purchase Order Item", filters={"parent": purchase_order, "docstatus": 1}, fields=["*"]
 	)
 
+	gp_received_by_item = get_gate_pass_received_qty_by_order_item(
+		purchase_order, document_reference="Purchase Order", exclude_gate_pass=exclude_gate_pass
+	)
+
 	items = []
 	for po_item in po_items:
-		# Calculate total received (Purchase Receipts + Gate Passes)
-		total_received = flt(po_item.received_qty)
+		# PR-updated received qty on PO Item
+		pr_received = flt(po_item.received_qty)
+		gp_received = flt(gp_received_by_item.get(po_item.name, 0))
 
 		# For Rate Contracts, pending quantity cannot be calculated
 		# since ordered quantity is 0
 		if is_rate_contract:
 			pending_qty = 0  # Not applicable for rate contracts
 			ordered_qty = 0
+			received_for_row = 0
 		else:
 			ordered_qty = flt(po_item.qty)
-			pending_qty = ordered_qty - total_received
+			# PR updates PO.received_qty; open GPs (no PR yet) also reserve pending.
+			pending_qty = max(0, ordered_qty - pr_received - gp_received)
+			# Prefill received_qty for new Gate In = remaining pending
+			received_for_row = pending_qty
 
 		items.append(
 			{
@@ -1721,10 +1814,12 @@ def get_purchase_order_items(purchase_order):
 				"stock_uom": po_item.stock_uom,
 				"conversion_factor": flt(po_item.conversion_factor) or 1.0,
 				"ordered_qty": ordered_qty,
-				"received_qty": flt(total_received),
+				"received_qty": received_for_row,
 				"dispatched_qty": 0,
 				"pending_qty": max(0, pending_qty),
 				"is_rate_contract": is_rate_contract,
+				"item_group": getattr(po_item, "item_group", None)
+				or frappe.db.get_value("Item", po_item.item_code, "item_group"),
 				# Pricing details
 				"rate": flt(po_item.rate),
 				"amount": flt(po_item.amount),
@@ -1744,6 +1839,76 @@ def get_purchase_order_items(purchase_order):
 		)
 
 	return items
+
+
+def get_gate_pass_received_qty_by_order_item(
+	reference_number, document_reference="Purchase Order", exclude_gate_pass=None
+):
+	"""Sum Gate Pass Table received_qty by order_item_name for GPs not yet linked to a PR."""
+	filters = {
+		"reference_number": reference_number,
+		"document_reference": document_reference,
+		"docstatus": ["<", 2],
+	}
+	gate_passes = frappe.get_all(
+		"Gate Pass", filters=filters, fields=["name", "purchase_receipt"]
+	)
+	# Only count GPs that have not created a PR yet (PR already updates PO.received_qty).
+	open_names = []
+	for gp in gate_passes:
+		if exclude_gate_pass and gp.name == exclude_gate_pass:
+			continue
+		if gp.purchase_receipt:
+			continue
+		open_names.append(gp.name)
+	if not open_names:
+		return {}
+
+	rows = frappe.get_all(
+		"Gate Pass Table",
+		filters={"parent": ["in", open_names]},
+		fields=["order_item_name", "received_qty"],
+	)
+	totals = {}
+	for row in rows:
+		key = row.order_item_name
+		if not key:
+			continue
+		totals[key] = flt(totals.get(key, 0)) + flt(row.received_qty)
+	return totals
+
+
+def get_gate_pass_received_qty(reference_number, item_code, document_reference="Purchase Order"):
+	"""
+	Calculate total received quantity from existing gate passes for this item
+
+	Args:
+		reference_number: Reference document name
+		item_code: Item code
+		document_reference: DocType name (default: Purchase Order)
+
+	Returns:
+		Total received quantity from gate passes
+	"""
+	gate_passes = frappe.get_all(
+		"Gate Pass",
+		filters={
+			"reference_number": reference_number,
+			"document_reference": document_reference,
+			"docstatus": ["!=", 2],  # Exclude cancelled
+		},
+		fields=["name"],
+	)
+
+	total_qty = 0
+	for gp in gate_passes:
+		items = frappe.get_all(
+			"Gate Pass Table", filters={"parent": gp.name, "item_code": item_code}, fields=["received_qty"]
+		)
+		for item in items:
+			total_qty += flt(item.received_qty)
+
+	return total_qty
 
 
 def get_subcontracting_order_items(subcontracting_order):
@@ -2082,39 +2247,6 @@ def make_reference_item_key(item_code, order_item_name=None, warehouse=None):
 	return f"{item_code or ''}::{warehouse or ''}"
 
 
-def get_gate_pass_received_qty(reference_number, item_code, document_reference="Purchase Order"):
-	"""
-	Calculate total received quantity from existing gate passes for this item
-
-	Args:
-		reference_number: Reference document name
-		item_code: Item code
-		document_reference: DocType name (default: Purchase Order)
-
-	Returns:
-		Total received quantity from gate passes
-	"""
-	gate_passes = frappe.get_all(
-		"Gate Pass",
-		filters={
-			"reference_number": reference_number,
-			"document_reference": document_reference,
-			"docstatus": ["!=", 2],  # Exclude cancelled
-		},
-		fields=["name"],
-	)
-
-	total_qty = 0
-	for gp in gate_passes:
-		items = frappe.get_all(
-			"Gate Pass Table", filters={"parent": gp.name, "item_code": item_code}, fields=["received_qty"]
-		)
-		for item in items:
-			total_qty += flt(item.received_qty)
-
-	return total_qty
-
-
 @frappe.whitelist()
 def get_address(document_reference, reference_number):
 	"""
@@ -2278,7 +2410,7 @@ def create_purchase_receipt(gate_pass_name):
 	# Create Purchase Receipt with header mapping from Purchase Order
 	pr = frappe.new_doc("Purchase Receipt")
 	pr.supplier = gate_pass.supplier
-	pr.company = gate_pass.company
+	pr.company = purchase_order.company
 	pr.gate_pass = gate_pass_name
 	if gate_pass.get("supplier_delivery_note"):
 		pr.supplier_delivery_note = gate_pass.supplier_delivery_note
@@ -2291,7 +2423,8 @@ def create_purchase_receipt(gate_pass_name):
 	pr.price_list_currency = purchase_order.price_list_currency
 	pr.plc_conversion_rate = purchase_order.plc_conversion_rate
 	pr.ignore_pricing_rule = purchase_order.ignore_pricing_rule
-	pr.set_warehouse = purchase_order.set_warehouse
+	location = cstr(gate_pass.get("location") or "").strip()
+	pr.set_warehouse = location or purchase_order.set_warehouse
 	pr.supplier_address = purchase_order.supplier_address
 	pr.address_display = purchase_order.address_display
 	pr.contact_person = purchase_order.contact_person
@@ -2307,11 +2440,14 @@ def create_purchase_receipt(gate_pass_name):
 
 	# Add items - fetch complete details from Purchase Order Item and override quantities from Gate Pass
 	for gate_pass_item in gate_pass.gate_pass_table:
+		received_qty = flt(gate_pass_item.received_qty)
+		if received_qty <= 0:
+			continue
+
 		# Get the original Purchase Order Item
 		po_item = frappe.get_doc("Purchase Order Item", gate_pass_item.order_item_name)
 
 		# Calculate quantities based on received quantity from Gate Pass
-		received_qty = flt(gate_pass_item.received_qty)
 		conversion_factor = flt(po_item.conversion_factor) or 1.0
 		received_stock_qty = received_qty * conversion_factor
 
@@ -2342,8 +2478,8 @@ def create_purchase_receipt(gate_pass_name):
 			"discount_amount": flt(po_item.discount_amount),
 			"margin_type": po_item.margin_type,
 			"margin_rate_or_amount": flt(po_item.margin_rate_or_amount),
-			# Warehouse - prefer from Gate Pass, fallback to PO
-			"warehouse": gate_pass_item.warehouse or po_item.warehouse,
+			# Warehouse - prefer Gate Pass location / row, fallback to PO
+			"warehouse": location or gate_pass_item.warehouse or po_item.warehouse,
 			"from_warehouse": po_item.from_warehouse if po_item.get("from_warehouse") else None,
 			# Accounting from PO
 			"expense_account": po_item.expense_account,
@@ -2396,17 +2532,120 @@ def create_purchase_receipt(gate_pass_name):
 
 		pr.append("items", pr_item)
 
+	if not pr.items:
+		frappe.throw(_("No items with received quantity found on Gate Pass {0}").format(gate_pass_name))
+
 	# Set missing values and calculate totals (mimics ERPNext's set_missing_values)
 	pr.run_method("set_missing_values")
 	# pr.run_method("calculate_taxes_and_totals")
 
 	pr.insert()
 
-	# Update Gate Pass with receipt reference
-	gate_pass.purchase_receipt = pr.name
-	gate_pass.save(ignore_permissions=True)
+	# Update Gate Pass with receipt reference (works even if GP is submitted)
+	frappe.db.set_value("Gate Pass", gate_pass_name, "purchase_receipt", pr.name, update_modified=False)
 
 	return pr.name
+
+
+@frappe.whitelist()
+def get_warehouses_for_company(company):
+	"""Non-group warehouses for the given company (PO Gate In location picker)."""
+	company = cstr(company).strip()
+	if not company:
+		return []
+	return frappe.get_all(
+		"Warehouse",
+		filters={"company": company, "is_group": 0},
+		fields=["name", "warehouse_name", "company"],
+		order_by="name asc",
+		limit_page_length=500,
+	)
+
+
+def create_gate_pass_from_purchase_order(purchase_order_name: str, enqueued_by: str | None = None):
+	"""Auto-create draft Gate In for a submitted Purchase Order."""
+	po = frappe.get_doc("Purchase Order", purchase_order_name)
+	if po.docstatus != 1:
+		return
+
+	existing = frappe.get_all(
+		"Gate Pass",
+		filters={
+			"document_reference": "Purchase Order",
+			"reference_number": po.name,
+			"company": po.company,
+			"docstatus": 0,
+		},
+		pluck="name",
+		limit=1,
+	)
+	if existing:
+		return
+
+	items = get_purchase_order_items(po.name)
+	# Skip if nothing pending
+	if not any(flt(i.get("pending_qty") or 0) > 0 or flt(i.get("received_qty") or 0) > 0 for i in items):
+		# Rate contracts may have zero ordered — still create empty shell? Skip if no items.
+		if not items:
+			return
+
+	gate_pass = frappe.new_doc("Gate Pass")
+	gate_pass.document_reference = "Purchase Order"
+	gate_pass.reference_number = po.name
+	gate_pass.company = po.company
+	gate_pass.entry_type = "Gate In"
+	gate_pass.supplier = po.supplier
+	gate_pass.address_display = resolve_reference_address(po, "Purchase Order")
+	gate_pass.flags.ignore_mandatory = True
+
+	for item in items:
+		# Only add lines with remaining qty (or rate-contract lines)
+		if not cint(item.get("is_rate_contract")) and flt(item.get("received_qty") or 0) <= 0:
+			continue
+		row = gate_pass.append("gate_pass_table", {})
+		for key, value in item.items():
+			if hasattr(row, key) or key in (
+				"item_code",
+				"item_name",
+				"description",
+				"uom",
+				"stock_uom",
+				"conversion_factor",
+				"ordered_qty",
+				"received_qty",
+				"dispatched_qty",
+				"pending_qty",
+				"rate",
+				"amount",
+				"warehouse",
+				"order_item_name",
+				"expense_account",
+				"cost_center",
+				"project",
+				"schedule_date",
+				"is_rate_contract",
+				"item_group",
+			):
+				row.set(key, value)
+
+	if not gate_pass.gate_pass_table and not any(cint(i.get("is_rate_contract")) for i in items):
+		return
+
+	gate_pass.insert(ignore_permissions=True, ignore_mandatory=True)
+	frappe.db.commit()  # nosemgrep
+
+
+def on_purchase_order_submit(doc, method):
+	"""Auto-create draft Gate In when Purchase Order is submitted."""
+	if doc.doctype != "Purchase Order" or doc.docstatus != 1:
+		return
+	frappe.enqueue(
+		create_gate_pass_from_purchase_order,
+		purchase_order_name=doc.name,
+		enqueued_by=frappe.session.user,
+		queue="long",
+		now=frappe.flags.in_test,
+	)
 
 
 @frappe.whitelist()

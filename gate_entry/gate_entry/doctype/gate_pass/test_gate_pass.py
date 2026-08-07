@@ -703,3 +703,72 @@ class TestGatePass(FrappeTestCase):
 		)
 		with patch("frappe.get_cached_doc", return_value=mock_ste):
 			self.assertEqual(gate_pass.derive_entry_type_from_stock_entry(), "Job Work Out")
+
+	def test_get_gate_pass_received_qty_by_order_item_skips_pr_linked(self):
+		from gate_entry.gate_entry.doctype.gate_pass.gate_pass import get_gate_pass_received_qty_by_order_item
+
+		with patch(
+			"frappe.get_all",
+			side_effect=[
+				[
+					frappe._dict(name="GP-1", purchase_receipt="PR-1"),
+					frappe._dict(name="GP-2", purchase_receipt=None),
+				],
+				[frappe._dict(order_item_name="poi-1", received_qty=23.0)],
+			],
+		):
+			totals = get_gate_pass_received_qty_by_order_item("PO-001")
+		self.assertEqual(totals.get("poi-1"), 23.0)
+
+	def test_validate_po_location_company_mismatch(self):
+		gate_pass = self.create_gate_pass(
+			company="Jayashree Spun Bond - 1ZT",
+			document_reference="Purchase Order",
+			reference_number="PO-001",
+			entry_type="Gate In",
+			location="Some Wh - TSNPL",
+		)
+		gate_pass.append(
+			"gate_pass_table",
+			{"item_code": "RM-1", "order_item_name": "poi-1", "received_qty": 10},
+		)
+		gate_pass._action = "submit"
+		with (
+			patch(
+				"frappe.db.get_value",
+				side_effect=["Thusma SMS Nonwovens Private Limited - 1Z0", "Jayashree Spun Bond - 1ZT"],
+			),
+			patch(
+				"gate_entry.gate_entry.doctype.gate_pass.gate_pass.get_purchase_order_items",
+				return_value=[{"order_item_name": "poi-1", "pending_qty": 50}],
+			),
+		):
+			with self.assertRaises(frappe.ValidationError):
+				gate_pass.validate_purchase_order_location_and_allocations()
+
+	def test_validate_po_over_allocation(self):
+		gate_pass = self.create_gate_pass(
+			company="Jayashree Spun Bond - 1ZT",
+			document_reference="Purchase Order",
+			reference_number="PO-001",
+			entry_type="Gate In",
+			location="RM Warehouse - JSB-1ZT",
+		)
+		gate_pass.name = "GP-NEW"
+		gate_pass.append(
+			"gate_pass_table",
+			{"item_code": "RM-1", "order_item_name": "poi-1", "received_qty": 40},
+		)
+		gate_pass._action = "submit"
+		with (
+			patch(
+				"frappe.db.get_value",
+				side_effect=["Jayashree Spun Bond - 1ZT", "Jayashree Spun Bond - 1ZT"],
+			),
+			patch(
+				"gate_entry.gate_entry.doctype.gate_pass.gate_pass.get_purchase_order_items",
+				return_value=[{"order_item_name": "poi-1", "pending_qty": 27}],
+			),
+		):
+			with self.assertRaises(frappe.ValidationError):
+				gate_pass.validate_purchase_order_location_and_allocations()

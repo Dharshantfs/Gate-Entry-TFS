@@ -12,6 +12,7 @@
   "gate_pass_date",
   "gate_pass_time",
   "company",
+  "location",
   "reference_document_section",
   "document_reference",
   "reference_number",
@@ -98,6 +99,15 @@
    "label": "Company",
    "options": "Company",
    "reqd": 1
+  },
+  {
+   "depends_on": "eval:doc.document_reference=='Purchase Order' || doc.document_reference=='Stock Entry'",
+   "description": "Selected store warehouse for this Gate Pass (PO Gate In picker, or auto-set for inter-company / job work).",
+   "fieldname": "location",
+   "fieldtype": "Link",
+   "label": "Location",
+   "options": "Warehouse",
+   "read_only_depends_on": "eval:doc.docstatus>0"
   },
   {
    "fieldname": "reference_document_section",

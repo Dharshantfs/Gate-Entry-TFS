@@ -153,6 +153,9 @@ doc_events = {
 		"on_trash": "gate_entry.gate_entry.doctype.gate_pass.gate_pass.on_subcontracting_receipt_trash",
 		"on_cancel": "gate_entry.gate_entry.doctype.gate_pass.gate_pass.on_subcontracting_receipt_cancel",
 	},
+	"Purchase Order": {
+		"on_submit": "gate_entry.gate_entry.doctype.gate_pass.gate_pass.on_purchase_order_submit",
+	},
 	"Stock Entry": {
 		"on_submit": "gate_entry.gate_entry.doctype.gate_pass.gate_pass.on_stock_entry_submit",
 		"on_trash": "gate_entry.gate_entry.doctype.gate_pass.gate_pass.on_stock_entry_trash",

@@ -18,7 +18,7 @@ class GatePassCustomUI {
 		this.items = [];
 		this.available_items = [];
 		this.wrapper = null;
-		this.precision = 3;
+		this.precision = 2;
 		this._resizeHandlerBound = false;
 		this.init();
 	}
@@ -141,6 +141,7 @@ class GatePassCustomUI {
 						received_qty: row.received_qty || 0,
 						dispatched_qty: row.dispatched_qty || 0,
 						pending_qty: row.pending_qty || 0,
+						item_group: row.item_group || row._item_group || "",
 						is_rate_contract: row.is_rate_contract || 0,
 						// Pricing details
 						rate: row.rate || 0,
@@ -491,13 +492,14 @@ class GatePassCustomUI {
 					<input
 						type="number"
 						class="form-control form-control-sm quantity-input"
-						value="${quantity_value}"
+						value="${Number(quantity_value).toFixed(2)}"
 						min="0"
 						step="0.01"
 						data-index="${index}"
 						data-field="${quantityField}"
 						${inputDisabled ? "disabled" : ""}
 					/>
+					${this.render_qty_visual_hint(item, quantity_value)}
 				</div>
 				<div class="item-col actions-col">
 					<button class="btn btn-xs btn-info info-btn" data-index="${index}" title="View Details">
@@ -892,8 +894,8 @@ class GatePassCustomUI {
 				return `
 					<tr>
 						<td>${frappe.utils.escape_html(roll.batch_no || "—")}</td>
-						<td class="text-right">${this.formatQuantity(roll.ordered_qty)}</td>
-						<td class="text-right">${this.formatQuantity(qty)}</td>
+						<td class="text-right">${this.formatQuantity(roll.ordered_qty, item)}</td>
+						<td class="text-right">${this.formatQuantity(qty, item)}</td>
 						<td>${frappe.utils.escape_html(roll.uom || "")}</td>
 					</tr>
 				`;
@@ -1111,7 +1113,7 @@ class GatePassCustomUI {
 						<span class="item-name">${frappe.utils.escape_html(item.item_name || item.item_code || "")}</span>
 					</div>
 					<div class="item-col received-qty-col outbound-qty-col">
-						<span class="outbound-qty-value">${this.formatQuantity(item.dispatched_qty)}</span>
+						<span class="outbound-qty-value">${this.formatQuantity(item.dispatched_qty, item)}</span>
 						${item.uom ? `<span class="outbound-qty-uom">${frappe.utils.escape_html(item.uom)}</span>` : ""}
 					</div>
 					<div class="item-col actions-col outbound-actions">
@@ -1128,11 +1130,35 @@ class GatePassCustomUI {
 		`;
 	}
 
-	formatQuantity(value) {
-		const number = frappe.utils.flt ? frappe.utils.flt(value || 0) : parseFloat(value || 0);
-		return frappe.format
-			? frappe.format(number, { fieldtype: "Float", precision: this.precision })
-			: (number || 0).toFixed(this.precision);
+	formatQuantity(value, item) {
+		const number = frappe.utils.flt ? frappe.utils.flt(value || 0) : parseFloat(value || 0) || 0;
+		const itemGroup = (item && (item.item_group || item._item_group)) || "";
+		const stockUom = ((item && (item.stock_uom || item.uom)) || "").toLowerCase();
+		const isRawMaterial =
+			itemGroup === "Raw Material" || (itemGroup || "").toLowerCase() === "raw material";
+
+		// Visual only: Raw Material in Kg shown as Ton (1 Ton = 1000 Kg)
+		if (isRawMaterial && (stockUom === "kg" || stockUom === "kgs" || !stockUom)) {
+			const tons = number / 1000;
+			return `${tons.toFixed(2)} Ton`;
+		}
+
+		return number.toFixed(this.precision);
+	}
+
+	render_qty_visual_hint(item, quantity_value) {
+		const itemGroup = (item && (item.item_group || item._item_group)) || "";
+		const stockUom = ((item && (item.stock_uom || item.uom)) || "").toLowerCase();
+		const isRawMaterial =
+			itemGroup === "Raw Material" || (itemGroup || "").toLowerCase() === "raw material";
+		if (!isRawMaterial) {
+			return "";
+		}
+		if (stockUom && stockUom !== "kg" && stockUom !== "kgs") {
+			return "";
+		}
+		const tons = (parseFloat(quantity_value) || 0) / 1000;
+		return `<div class="qty-ton-hint text-muted" style="font-size:11px;margin-top:2px;">≈ ${tons.toFixed(2)} Ton</div>`;
 	}
 }
 

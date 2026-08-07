@@ -8,6 +8,7 @@
   "field_order": [
   "item_code",
   "item_name",
+  "item_group",
   "batch_no",
   "description",
   "uom",
@@ -54,6 +55,14 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Item Name",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "item_code.item_group",
+   "fieldname": "item_group",
+   "fieldtype": "Link",
+   "label": "Item Group",
+   "options": "Item Group",
    "read_only": 1
   },
   {
