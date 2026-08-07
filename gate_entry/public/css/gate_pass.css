@@ -314,7 +314,8 @@
 }
 
 .received-qty-col {
-	flex: 0 0 150px;
+	flex: 0 0 220px;
+	align-items: flex-start;
 }
 
 .actions-col,
@@ -725,28 +726,65 @@
 }
 
 /* Raw Material Ton visual (stored Kg, display Ton) */
-@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@600;700;800&display=swap");
+
+.qty-field-stack {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	gap: 6px;
+	width: 100%;
+	min-width: 0;
+}
+
+.qty-field-stack .quantity-input {
+	width: 100%;
+	min-width: 0;
+	max-width: 100%;
+	box-sizing: border-box;
+	font-variant-numeric: tabular-nums;
+	font-size: 14px;
+	font-weight: 600;
+	text-align: right;
+	padding: 6px 10px;
+}
 
 .qty-ton-hint {
+	display: flex;
+	flex-direction: row;
+	flex-wrap: nowrap;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 4px;
+	width: 100%;
 	font-family: "DM Sans", "Segoe UI", system-ui, sans-serif;
 	font-size: 13px;
 	font-weight: 700;
-	letter-spacing: 0.02em;
+	letter-spacing: 0.01em;
 	color: #0f766e;
-	margin-top: 4px;
 	line-height: 1.2;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
-.qty-ton-hint strong {
-	font-weight: 700;
+.qty-ton-hint .qty-ton-approx {
+	font-weight: 600;
+	opacity: 0.85;
+}
+
+.qty-ton-hint .qty-ton-value,
+.qty-ton-hint .qty-ton-unit {
+	font-weight: 800;
 	color: #0d5c56;
 }
 
 .qty-ton-display {
 	font-family: "DM Sans", "Segoe UI", system-ui, sans-serif;
 	font-size: 14px;
-	font-weight: 700;
+	font-weight: 800;
 	color: #0f766e;
+	white-space: nowrap;
 }
 
 .qty-ton-display strong {
@@ -754,7 +792,7 @@
 	color: #0d5c56;
 }
 
-.received-qty-col .quantity-input {
-	font-variant-numeric: tabular-nums;
+.items-list-header .received-qty-col {
+	align-items: center;
 }
 

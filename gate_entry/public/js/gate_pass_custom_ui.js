@@ -489,17 +489,19 @@ class GatePassCustomUI {
 					<span class="item-name">${frappe.utils.escape_html(item.item_name)}</span>
 				</div>
 				<div class="item-col received-qty-col">
-					<input
-						type="number"
-						class="form-control form-control-sm quantity-input"
-						value="${Number(quantity_value).toFixed(2)}"
-						min="0"
-						step="0.01"
-						data-index="${index}"
-						data-field="${quantityField}"
-						${inputDisabled ? "disabled" : ""}
-					/>
-					${this.render_qty_visual_hint(item, quantity_value)}
+					<div class="qty-field-stack">
+						<input
+							type="number"
+							class="form-control form-control-sm quantity-input"
+							value="${Number(quantity_value).toFixed(2)}"
+							min="0"
+							step="0.01"
+							data-index="${index}"
+							data-field="${quantityField}"
+							${inputDisabled ? "disabled" : ""}
+						/>
+						${this.render_qty_visual_hint(item, quantity_value)}
+					</div>
 				</div>
 				<div class="item-col actions-col">
 					<button class="btn btn-xs btn-info info-btn" data-index="${index}" title="View Details">
@@ -580,11 +582,16 @@ class GatePassCustomUI {
 				const value = parseFloat($(this).val() || 0);
 				self.validateQuantityInput(index, value, $(this));
 				const item = self.get_ui_items()[index];
-				const $hint = $(this).closest(".received-qty-col").find(".qty-ton-hint");
+				const $hint = $(this).closest(".qty-field-stack, .received-qty-col").find(".qty-ton-hint");
 				if ($hint.length && item) {
 					const html = self.render_qty_visual_hint(item, value);
 					if (html) {
 						$hint.replaceWith(html);
+					}
+				} else if (item) {
+					const html = self.render_qty_visual_hint(item, value);
+					if (html) {
+						$(this).closest(".qty-field-stack").append(html);
 					}
 				}
 			});
@@ -1166,7 +1173,7 @@ class GatePassCustomUI {
 			return "";
 		}
 		const tons = (parseFloat(quantity_value) || 0) / 1000;
-		return `<div class="qty-ton-hint">≈ <strong>${tons.toFixed(2)} Ton</strong></div>`;
+		return `<div class="qty-ton-hint"><span class="qty-ton-approx">≈</span> <strong class="qty-ton-value">${tons.toFixed(2)}</strong> <strong class="qty-ton-unit">Ton</strong></div>`;
 	}
 }
 
