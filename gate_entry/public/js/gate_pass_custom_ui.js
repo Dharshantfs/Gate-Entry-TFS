@@ -97,10 +97,83 @@ class GatePassCustomUI {
 			return;
 		}
 
+		this.ensure_items_layout_styles();
 		this.wrapper = this.frm.fields_dict.custom_ui.$wrapper;
 		this.render();
 		this.setup_event_listeners();
 		this.setup_responsive_listener();
+	}
+
+	/**
+	 * Inject critical row layout so Item Name / Qty / Ton stay aligned
+	 * even when desk CSS assets are cached from an older build.
+	 */
+	ensure_items_layout_styles() {
+		const styleId = "gate-pass-items-layout-v3";
+		if (document.getElementById(styleId)) {
+			return;
+		}
+		const style = document.createElement("style");
+		style.id = styleId;
+		style.textContent = `
+			.gate-pass-custom-ui .items-list-header,
+			.gate-pass-custom-ui .item-row {
+				display: grid !important;
+				grid-template-columns: 150px minmax(140px, 240px) minmax(220px, 1fr) 96px !important;
+				align-items: center !important;
+				column-gap: 12px !important;
+			}
+			.gate-pass-custom-ui .item-col {
+				flex: none !important;
+				width: auto !important;
+				max-width: none !important;
+				min-width: 0 !important;
+				padding: 0 !important;
+			}
+			.gate-pass-custom-ui .item-name-col .item-name {
+				display: block;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+			.gate-pass-custom-ui .qty-field-stack,
+			.gate-pass-custom-ui .qty-with-ton {
+				display: inline-flex !important;
+				flex-direction: row !important;
+				flex-wrap: nowrap !important;
+				align-items: center !important;
+				justify-content: flex-start !important;
+				gap: 10px !important;
+				width: auto !important;
+				max-width: 100%;
+			}
+			.gate-pass-custom-ui .qty-field-stack .quantity-input,
+			.gate-pass-custom-ui .qty-with-ton .quantity-input {
+				flex: 0 0 118px !important;
+				width: 118px !important;
+				min-width: 118px !important;
+				max-width: 118px !important;
+			}
+			.gate-pass-custom-ui .qty-ton-hint {
+				display: inline-flex !important;
+				flex-direction: row !important;
+				align-items: center !important;
+				gap: 4px !important;
+				white-space: nowrap !important;
+				font-weight: 800 !important;
+				color: #0d5c56 !important;
+				font-size: 15px !important;
+			}
+			@media (max-width: 768px) {
+				.gate-pass-custom-ui .items-list-header { display: none !important; }
+				.gate-pass-custom-ui .item-row {
+					display: flex !important;
+					flex-direction: column !important;
+					align-items: stretch !important;
+				}
+			}
+		`;
+		document.head.appendChild(style);
 	}
 
 	/**
@@ -249,6 +322,7 @@ class GatePassCustomUI {
 	render() {
 		// Load items from child table before rendering
 		this.load_items_from_table();
+		this.ensure_items_layout_styles();
 
 		// Ensure wrapper exists
 		if (!this.wrapper || !this.wrapper.length) {
@@ -489,10 +563,11 @@ class GatePassCustomUI {
 					<span class="item-name">${frappe.utils.escape_html(item.item_name)}</span>
 				</div>
 				<div class="item-col received-qty-col">
-					<div class="qty-field-stack">
+					<div class="qty-field-stack qty-with-ton" style="display:inline-flex;flex-direction:row;align-items:center;gap:10px;flex-wrap:nowrap;">
 						<input
 							type="number"
 							class="form-control form-control-sm quantity-input"
+							style="width:118px;max-width:118px;flex:0 0 118px;"
 							value="${Number(quantity_value).toFixed(2)}"
 							min="0"
 							step="0.01"

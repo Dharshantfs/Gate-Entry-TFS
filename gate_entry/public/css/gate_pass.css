@@ -81,7 +81,6 @@
 
 /* List Header */
 .items-list-header {
-	display: flex;
 	background: #f7fafc;
 	padding: 12px 15px;
 	font-weight: 600;
@@ -259,10 +258,16 @@
 	color: #c53030;
 }
 
-/* Item Row */
-.item-row {
-	display: flex;
+/* Item Row — CSS grid keeps name + qty close; Ton sits beside qty */
+.gate-pass-custom-ui .items-list-header,
+.gate-pass-custom-ui .item-row {
+	display: grid;
+	grid-template-columns: 150px minmax(140px, 240px) minmax(220px, 1fr) 96px;
 	align-items: center;
+	column-gap: 12px;
+}
+
+.item-row {
 	padding: 15px;
 	border-bottom: 1px solid #e2e8f0;
 	transition: all 0.2s ease;
@@ -296,38 +301,34 @@
 	background: #c6f6d5;
 }
 
-/* Column Layout — name sized to content; qty+Ton fill the gap */
-.item-col {
-	padding: 0 8px;
+/* Column Layout (grid children — no flex grow gaps) */
+.gate-pass-custom-ui .item-col {
+	padding: 0;
 	display: flex;
 	align-items: center;
 	min-width: 0;
+	flex: none;
+	width: auto;
+	max-width: none;
 }
 
 .item-code-col {
-	flex: 0 0 130px;
 	font-weight: 600;
 	color: #2d3748;
 }
 
 .item-name-col {
-	flex: 0 1 auto;
-	min-width: 100px;
-	max-width: 36%;
 	color: #4a5568;
 	font-size: 14px;
 }
 
 .received-qty-col {
-	flex: 1 1 240px;
-	min-width: 200px;
 	align-items: center;
 	justify-content: flex-start;
 }
 
 .actions-col,
 .outbound-actions {
-	flex: 0 0 88px;
 	display: flex;
 	gap: 8px;
 	justify-content: flex-end;
@@ -666,21 +667,9 @@
 
 /* Tablet Optimization */
 @media (min-width: 769px) and (max-width: 1024px) {
-	.item-code-col {
-		flex: 0 0 120px;
-	}
-
-	.item-name-col {
-		max-width: 32%;
-	}
-
-	.received-qty-col {
-		flex: 1 1 220px;
-		min-width: 180px;
-	}
-
-	.actions-col {
-		flex: 0 0 88px;
+	.gate-pass-custom-ui .items-list-header,
+	.gate-pass-custom-ui .item-row {
+		grid-template-columns: 130px minmax(120px, 200px) minmax(200px, 1fr) 88px;
 	}
 }
 
