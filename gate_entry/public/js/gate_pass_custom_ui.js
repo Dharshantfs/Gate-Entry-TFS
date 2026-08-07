@@ -579,6 +579,14 @@ class GatePassCustomUI {
 				const index = $(this).data("index");
 				const value = parseFloat($(this).val() || 0);
 				self.validateQuantityInput(index, value, $(this));
+				const item = self.get_ui_items()[index];
+				const $hint = $(this).closest(".received-qty-col").find(".qty-ton-hint");
+				if ($hint.length && item) {
+					const html = self.render_qty_visual_hint(item, value);
+					if (html) {
+						$hint.replaceWith(html);
+					}
+				}
 			});
 	}
 
@@ -1140,7 +1148,7 @@ class GatePassCustomUI {
 		// Visual only: Raw Material in Kg shown as Ton (1 Ton = 1000 Kg)
 		if (isRawMaterial && (stockUom === "kg" || stockUom === "kgs" || !stockUom)) {
 			const tons = number / 1000;
-			return `${tons.toFixed(2)} Ton`;
+			return `<span class="qty-ton-display">${tons.toFixed(2)} <strong>Ton</strong></span>`;
 		}
 
 		return number.toFixed(this.precision);
@@ -1158,7 +1166,7 @@ class GatePassCustomUI {
 			return "";
 		}
 		const tons = (parseFloat(quantity_value) || 0) / 1000;
-		return `<div class="qty-ton-hint text-muted" style="font-size:11px;margin-top:2px;">≈ ${tons.toFixed(2)} Ton</div>`;
+		return `<div class="qty-ton-hint">≈ <strong>${tons.toFixed(2)} Ton</strong></div>`;
 	}
 }
 

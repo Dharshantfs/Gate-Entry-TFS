@@ -1193,6 +1193,7 @@ function process_qr_scan(frm, qr_text) {
 /**
  * Modern warehouse picker for Purchase Order Gate In.
  * Company is read-only (PO / Gate Pass company); warehouses of that company only.
+ * Uses Frappe Dialog + HTML (no external Vue CDN — blocked/blank on many sites).
  */
 function show_po_location_picker(frm) {
 	return new Promise((resolve) => {
@@ -1203,66 +1204,33 @@ function show_po_location_picker(frm) {
 			return;
 		}
 
-		const ensureVue = () => {
-			if (window.Vue) {
-				return Promise.resolve();
-			}
-			return new Promise((res, rej) => {
-				const s = document.createElement("script");
-				s.src = "https://unpkg.com/vue@3/dist/vue.global.prod.js";
-				s.onload = () => res();
-				s.onerror = () => rej(new Error("Failed to load Vue"));
-				document.head.appendChild(s);
-			});
-		};
-
-		ensureVue()
-			.then(() => {
-				frappe.call({
-					method: "gate_entry.gate_entry.doctype.gate_pass.gate_pass.get_warehouses_for_company",
-					args: { company },
-					callback(r) {
-						const warehouses = r.message || [];
-						open_location_vue_dialog(company, warehouses, resolve);
-					},
-				});
-			})
-			.catch(() => {
-				// Fallback without Vue
-				const options = [];
-				frappe.call({
-					method: "gate_entry.gate_entry.doctype.gate_pass.gate_pass.get_warehouses_for_company",
-					args: { company },
-					async: false,
-					callback(r) {
-						(r.message || []).forEach((w) => options.push(w.name));
-					},
-				});
-				frappe.prompt(
-					{
-						label: __("Location (Warehouse)"),
-						fieldname: "location",
-						fieldtype: "Select",
-						options: options.join("\n"),
-						reqd: 1,
-						description: __("Company: {0}", [company]),
-					},
-					(values) => resolve(values.location),
-					__("Select store warehouse"),
-					__("Confirm")
-				);
-			});
+		frappe.call({
+			method: "gate_entry.gate_entry.doctype.gate_pass.gate_pass.get_warehouses_for_company",
+			args: { company },
+			freeze: true,
+			freeze_message: __("Loading warehouses..."),
+			callback(r) {
+				const warehouses = r.message || [];
+				open_location_warehouse_dialog(company, warehouses, resolve);
+			},
+			error() {
+				frappe.msgprint(__("Could not load warehouses for {0}", [company]));
+				resolve(null);
+			},
+		});
 	});
 }
 
-function open_location_vue_dialog(company, warehouses, resolve) {
+function open_location_warehouse_dialog(company, warehouses, resolve) {
+	ensure_po_location_picker_styles();
+
 	const d = new frappe.ui.Dialog({
 		title: __("Select Location Warehouse"),
 		size: "large",
-		fields: [{ fieldtype: "HTML", fieldname: "vue_host" }],
+		fields: [{ fieldtype: "HTML", fieldname: "picker_host" }],
 		primary_action_label: __("Confirm"),
 		primary_action() {
-			const selected = d._vue_selected;
+			const selected = d._selected_warehouse;
 			if (!selected) {
 				frappe.msgprint(__("Please select a warehouse."));
 				return;
@@ -1278,76 +1246,126 @@ function open_location_vue_dialog(company, warehouses, resolve) {
 	});
 
 	d.show();
-	const host = d.fields_dict.vue_host.$wrapper.get(0);
-	host.innerHTML = `<div id="po-location-vue-root"></div>`;
 
-	const { createApp, ref, computed } = Vue;
-	const app = createApp({
-		setup() {
-			const search = ref("");
-			const selected = ref("");
-			const filtered = computed(() => {
-				const q = (search.value || "").toLowerCase().trim();
-				if (!q) return warehouses;
-				return warehouses.filter(
+	const $host = d.fields_dict.picker_host.$wrapper;
+	$host.empty().append(`
+		<div class="po-loc-picker">
+			<div class="po-loc-company">
+				<span class="po-loc-label">${frappe.utils.escape_html(__("Company"))}</span>
+				<span class="po-loc-value">${frappe.utils.escape_html(company)}</span>
+			</div>
+			<input type="search" class="form-control po-loc-search"
+				placeholder="${frappe.utils.escape_html(__("Search warehouse..."))}" />
+			<div class="po-loc-list"></div>
+		</div>
+	`);
+
+	const $list = $host.find(".po-loc-list");
+	const $search = $host.find(".po-loc-search");
+
+	const render_list = (query) => {
+		const q = (query || "").toLowerCase().trim();
+		const filtered = !q
+			? warehouses
+			: warehouses.filter(
 					(w) =>
 						(w.name || "").toLowerCase().includes(q) ||
 						(w.warehouse_name || "").toLowerCase().includes(q)
-				);
-			});
-			const pick = (name) => {
-				selected.value = name;
-				d._vue_selected = name;
-			};
-			return { company, search, selected, filtered, pick };
-		},
-		template: `
-			<div class="po-loc-picker">
-				<div class="po-loc-company">
-					<span class="po-loc-label">{{ __('Company') }}</span>
-					<span class="po-loc-value">{{ company }}</span>
-				</div>
-				<input class="form-control po-loc-search" v-model="search"
-					:placeholder="__('Search warehouse...')" />
-				<div class="po-loc-list">
-					<button type="button" class="po-loc-row"
-						v-for="w in filtered" :key="w.name"
-						:class="{ active: selected === w.name }"
-						@click="pick(w.name)">
-						<span class="po-loc-name">{{ w.name }}</span>
-					</button>
-					<div v-if="!filtered.length" class="text-muted po-loc-empty">
-						{{ __('No warehouses found') }}
-					</div>
-				</div>
-			</div>
-		`,
-	});
-	app.mount("#po-location-vue-root");
+			  );
 
-	if (!document.getElementById("po-loc-picker-style")) {
-		const style = document.createElement("style");
-		style.id = "po-loc-picker-style";
-		style.textContent = `
-			.po-loc-picker { font-family: inherit; }
-			.po-loc-company {
-				display: flex; flex-direction: column; gap: 4px;
-				padding: 12px 14px; margin-bottom: 12px;
-				border-radius: 10px; background: #f4f5f7;
+		$list.empty();
+		if (!filtered.length) {
+			$list.append(
+				`<div class="po-loc-empty">${frappe.utils.escape_html(
+					warehouses.length
+						? __("No warehouses match your search")
+						: __("No warehouses found for this company. Create a warehouse first.")
+				)}</div>`
+			);
+			return;
+		}
+
+		filtered.forEach((w) => {
+			const name = w.name || "";
+			const $row = $(`
+				<button type="button" class="po-loc-row" data-warehouse="${frappe.utils.escape_html(name)}">
+					<span class="po-loc-name">${frappe.utils.escape_html(name)}</span>
+					${
+						w.warehouse_name && w.warehouse_name !== name
+							? `<span class="po-loc-sub">${frappe.utils.escape_html(w.warehouse_name)}</span>`
+							: ""
+					}
+				</button>
+			`);
+			if (d._selected_warehouse === name) {
+				$row.addClass("active");
 			}
-			.po-loc-label { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #6c7680; }
-			.po-loc-value { font-size: 15px; font-weight: 600; color: #1f272e; }
-			.po-loc-search { margin-bottom: 10px; border-radius: 8px; }
-			.po-loc-list { max-height: 320px; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
-			.po-loc-row {
-				text-align: left; border: 1px solid #e2e6ea; background: #fff;
-				border-radius: 8px; padding: 10px 12px; cursor: pointer;
-			}
-			.po-loc-row:hover { border-color: #2490ef; }
-			.po-loc-row.active { border-color: #2490ef; background: #eef6ff; }
-			.po-loc-name { font-size: 13px; color: #1f272e; }
-			.po-loc-empty { padding: 16px; text-align: center; }
-		`;
-		document.head.appendChild(style);
+			$list.append($row);
+		});
+	};
+
+	$list.on("click", ".po-loc-row", function () {
+		const name = $(this).attr("data-warehouse");
+		d._selected_warehouse = name;
+		$list.find(".po-loc-row").removeClass("active");
+		$(this).addClass("active");
+	});
+
+	$search.on("input", function () {
+		render_list($(this).val());
+	});
+
+	render_list("");
+	setTimeout(() => $search.trigger("focus"), 200);
+}
+
+function ensure_po_location_picker_styles() {
+	if (document.getElementById("po-loc-picker-style")) {
+		return;
 	}
+	const style = document.createElement("style");
+	style.id = "po-loc-picker-style";
+	style.textContent = `
+		@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@500;600;700&display=swap');
+		.po-loc-picker { font-family: "DM Sans", "Segoe UI", sans-serif; }
+		.po-loc-company {
+			display: flex; flex-direction: column; gap: 4px;
+			padding: 14px 16px; margin-bottom: 14px;
+			border-radius: 12px; background: linear-gradient(135deg, #f0f4f8 0%, #e8eef5 100%);
+			border: 1px solid #dde3ea;
+		}
+		.po-loc-label {
+			font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+			font-weight: 600; color: #5b6570;
+		}
+		.po-loc-value { font-size: 16px; font-weight: 700; color: #15202b; }
+		.po-loc-search {
+			margin-bottom: 12px; border-radius: 10px; height: 40px;
+			border: 1px solid #cfd6dd; font-size: 14px;
+		}
+		.po-loc-list {
+			max-height: 340px; overflow: auto; display: flex;
+			flex-direction: column; gap: 8px; padding-right: 2px;
+		}
+		.po-loc-row {
+			display: flex; flex-direction: column; gap: 2px; align-items: flex-start;
+			text-align: left; border: 1px solid #e2e6ea; background: #fff;
+			border-radius: 10px; padding: 12px 14px; cursor: pointer;
+			transition: border-color .15s, background .15s, box-shadow .15s;
+		}
+		.po-loc-row:hover {
+			border-color: #2490ef; box-shadow: 0 1px 4px rgba(36,144,239,.12);
+		}
+		.po-loc-row.active {
+			border-color: #2490ef; background: #eef6ff;
+			box-shadow: 0 0 0 1px #2490ef inset;
+		}
+		.po-loc-name { font-size: 14px; font-weight: 600; color: #15202b; }
+		.po-loc-sub { font-size: 12px; color: #6c7680; }
+		.po-loc-empty {
+			padding: 28px 16px; text-align: center; color: #6c7680;
+			font-weight: 500; border: 1px dashed #d0d7de; border-radius: 10px;
+		}
+	`;
+	document.head.appendChild(style);
 }

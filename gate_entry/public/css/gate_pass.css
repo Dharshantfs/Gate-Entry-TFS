@@ -724,3 +724,37 @@
 	100% { transform: translate(-50%, -50%) rotate(360deg); }
 }
 
+/* Raw Material Ton visual (stored Kg, display Ton) */
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@600;700&display=swap");
+
+.qty-ton-hint {
+	font-family: "DM Sans", "Segoe UI", system-ui, sans-serif;
+	font-size: 13px;
+	font-weight: 700;
+	letter-spacing: 0.02em;
+	color: #0f766e;
+	margin-top: 4px;
+	line-height: 1.2;
+}
+
+.qty-ton-hint strong {
+	font-weight: 700;
+	color: #0d5c56;
+}
+
+.qty-ton-display {
+	font-family: "DM Sans", "Segoe UI", system-ui, sans-serif;
+	font-size: 14px;
+	font-weight: 700;
+	color: #0f766e;
+}
+
+.qty-ton-display strong {
+	font-weight: 800;
+	color: #0d5c56;
+}
+
+.received-qty-col .quantity-input {
+	font-variant-numeric: tabular-nums;
+}
+
